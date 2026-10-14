@@ -1,4 +1,5 @@
 import cookie from "@fastify/cookie";
+import { STATUS_CODES } from "node:http";
 import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
 import { verify } from "@node-rs/argon2";
@@ -11,7 +12,9 @@ import {
   RegisterSchema,
   UpdateVehicleSchema,
   normalizeRegistrationNumber,
+  toFieldErrors,
   type ApiRole,
+  type FieldErrors,
 } from "@autospokes/shared";
 import Fastify, {
   type FastifyReply,
@@ -87,6 +90,16 @@ function csrfCookieOptions(secure: boolean) {
 
 function httpError(statusCode: number, message: string): Error & { statusCode: number } {
   return Object.assign(new Error(message), { statusCode });
+}
+
+function validationError(
+  message: string,
+  zodError?: Parameters<typeof toFieldErrors>[0],
+  fieldErrors?: FieldErrors,
+): Error & { statusCode: number; fieldErrors: FieldErrors } {
+  return Object.assign(httpError(400, message), {
+    fieldErrors: zodError ? toFieldErrors(zodError) : (fieldErrors ?? {}),
+  });
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
@@ -183,6 +196,23 @@ export function buildApp({ authRepository, ownerRepository, jwtSecret, nodeEnv }
   app.register(cookie);
   app.register(jwt, { secret: jwtSecret });
   app.register(rateLimit, { global: false });
+  app.setErrorHandler((error: Error & { statusCode?: number; fieldErrors?: FieldErrors }, request, reply) => {
+    const statusCode = error.statusCode ?? 500;
+    if (statusCode >= 500) {
+      request.log.error(error);
+      return reply.code(statusCode).send({
+        statusCode,
+        error: "Internal Server Error",
+        message: "Something went wrong",
+      });
+    }
+    return reply.code(statusCode).send({
+      statusCode,
+      error: STATUS_CODES[statusCode] ?? "Error",
+      message: error.message,
+      ...(error.fieldErrors ? { fieldErrors: error.fieldErrors } : {}),
+    });
+  });
 
   app.decorate("authenticate", async (request) => {
     try {
@@ -433,7 +463,7 @@ export function buildApp({ authRepository, ownerRepository, jwtSecret, nodeEnv }
     { preHandler: ownerOnly },
     async (request) => {
       const parsed = OwnerProfileUpdateSchema.safeParse(request.body);
-      if (!parsed.success) throw httpError(400, "Invalid owner profile details");
+      if (!parsed.success) throw validationError("Invalid owner profile details", parsed.error);
       const profile = await ownerRepository.updateOwnerProfile(
         request.user.pid,
         ownerAccountId(request),
@@ -460,13 +490,15 @@ export function buildApp({ authRepository, ownerRepository, jwtSecret, nodeEnv }
     { preHandler: ownerOnly },
     async (request, reply) => {
       const parsed = CreateVehicleSchema.safeParse(request.body);
-      if (!parsed.success) throw httpError(400, "Invalid vehicle details");
+      if (!parsed.success) throw validationError("Invalid vehicle details", parsed.error);
       const input = parsed.data;
       if (
         input.providerType !== "SOCIETY_VENDOR" &&
         input.assignedWasherName
       ) {
-        throw httpError(400, "An assigned washer is only valid for a Society Vendor");
+        throw validationError("Invalid vehicle details", undefined, {
+          assignedWasherName: ["An assigned washer is only valid for a Society Vendor"],
+        });
       }
       try {
         const vehicle = await ownerRepository.createVehicle(ownerAccountId(request), {
@@ -524,7 +556,7 @@ export function buildApp({ authRepository, ownerRepository, jwtSecret, nodeEnv }
       if (!existing) throw httpError(404, "Vehicle not found");
 
       const parsed = UpdateVehicleSchema.safeParse(request.body);
-      if (!parsed.success) throw httpError(400, "Invalid vehicle details");
+      if (!parsed.success) throw validationError("Invalid vehicle details", parsed.error);
       const input = parsed.data;
       const nextProvider = input.providerType !== undefined
         ? input.providerType
@@ -533,7 +565,9 @@ export function buildApp({ authRepository, ownerRepository, jwtSecret, nodeEnv }
         nextProvider !== "SOCIETY_VENDOR" &&
         input.assignedWasherName
       ) {
-        throw httpError(400, "An assigned washer is only valid for a Society Vendor");
+        throw validationError("Invalid vehicle details", undefined, {
+          assignedWasherName: ["An assigned washer is only valid for a Society Vendor"],
+        });
       }
 
       const update: typeof input & { registrationNumberNormalized?: string } = {

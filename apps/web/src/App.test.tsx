@@ -1,3 +1,4 @@
+import { CreateVehicleSchema } from "@autospokes/shared";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -147,6 +148,12 @@ describe("Owner experience", () => {
     expect(fetchMock).toHaveBeenCalledWith("/owner/vehicles", expect.objectContaining({
       method: "POST",
     }));
+    const createCall = fetchMock.mock.calls.find(
+      ([url, init]) => url === "/owner/vehicles" && init?.method === "POST",
+    );
+    const body = JSON.parse(String((createCall?.[1] as RequestInit).body)) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("status");
+    expect(CreateVehicleSchema.safeParse(body).success).toBe(true);
     expect(within(document.body).getByText("No provider selected")).toBeInTheDocument();
   });
 });

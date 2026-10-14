@@ -286,6 +286,57 @@ describe("owner profile and vehicle operations", () => {
     expect(updateConflict.statusCode).toBe(409);
   });
 
+  it("accepts the Add Vehicle form payload and rejects the former status \"null\" mismatch with field errors", async () => {
+    const { app, authRepository, ownerRepository } = createApp();
+    const owner = await createOwner(app, authRepository, ownerRepository, "form@example.test");
+    const formPayload = {
+      type: "FOUR_WHEELER",
+      registrationNumber: "MH 12 AB 1234",
+      make: null,
+      model: null,
+      lengthCm: null,
+      widthCm: null,
+      heightCm: null,
+      photoUrls: [],
+      locationName: null,
+      address: null,
+      city: null,
+      postalCode: null,
+      providerType: null,
+      providerName: null,
+      assignedWasherName: null,
+    };
+    const post = (payload: unknown) =>
+      app.inject({
+        method: "POST",
+        url: "/owner/vehicles",
+        headers: { authorization: owner.authorization },
+        payload: payload as Record<string, unknown>,
+      });
+
+    const created = await post(formPayload);
+    const stringNull = await post({ ...formPayload, registrationNumber: "MH 12 AB 9999", status: "null" });
+    const unknown = await post({ ...formPayload, registrationNumber: "MH 12 AB 9998", ownerId: "x" });
+    const invalid = await post({
+      type: "BOAT",
+      registrationNumber: "--",
+      lengthCm: 0,
+      photoUrls: ["ftp://example.test/a.png"],
+    });
+
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({ status: "ACTIVE", providerType: null, make: null });
+    expect(stringNull.statusCode).toBe(400);
+    expect(stringNull.json().fieldErrors.status).toHaveLength(1);
+    expect(unknown.statusCode).toBe(400);
+    expect(unknown.json().fieldErrors.form[0]).toContain("ownerId");
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json()).toMatchObject({ statusCode: 400, message: "Invalid vehicle details" });
+    expect(Object.keys(invalid.json().fieldErrors).sort()).toEqual(
+      ["lengthCm", "photoUrls", "registrationNumber", "type"],
+    );
+  });
+
   it("rejects invalid optional fields and provider combinations", async () => {
     const { app, authRepository, ownerRepository } = createApp();
     const owner = await createOwner(app, authRepository, ownerRepository, "invalid@example.test");

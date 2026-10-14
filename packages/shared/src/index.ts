@@ -60,9 +60,14 @@ export type VehicleProviderType = z.infer<typeof VehicleProviderTypeSchema>;
 
 const optionalLabel = (max: number) => z.string().trim().max(max).optional().nullable();
 const positiveDimension = z.number().positive().max(100_000).optional().nullable();
-const RegistrationNumberSchema = z.string().trim().min(3).max(32)
-  .regex(/^[A-Za-z0-9 -]+$/)
-  .refine((value) => value.replace(/[\s-]+/g, "").length >= 3);
+const RegistrationNumberSchema = z.string().trim()
+  .min(3, "Registration number must be at least 3 characters")
+  .max(32, "Registration number must be 32 characters or fewer")
+  .regex(/^[A-Za-z0-9 -]+$/, "Registration number may only contain letters, numbers, spaces and hyphens")
+  .refine(
+    (value) => value.replace(/[\s-]+/g, "").length >= 3,
+    "Registration number must include at least 3 letters or numbers",
+  );
 
 const VehicleFieldsSchema = z.object({
   type: VehicleTypeSchema.optional(),
@@ -97,6 +102,24 @@ export const UpdateVehicleSchema = VehicleFieldsSchema.refine(
   (fields) => Object.keys(fields).length > 0,
   "At least one vehicle field must be provided",
 );
+
+export type FieldErrors = Record<string, string[]>;
+
+// Only field paths and validation messages are returned, never submitted values.
+export function toFieldErrors(error: z.ZodError): FieldErrors {
+  const fieldErrors: FieldErrors = {};
+  for (const issue of error.issues) {
+    let field = issue.path.length > 0 ? String(issue.path[0]) : "form";
+    if (issue.code === "unrecognized_keys") {
+      field = "form";
+    }
+    const message = issue.code === "unrecognized_keys"
+      ? `Unsupported field: ${issue.keys.join(", ")}`
+      : issue.message;
+    (fieldErrors[field] ??= []).push(message);
+  }
+  return fieldErrors;
+}
 
 export type CreateVehicleInput = z.infer<typeof CreateVehicleSchema>;
 export type UpdateVehicleInput = z.infer<typeof UpdateVehicleSchema>;

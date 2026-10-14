@@ -679,11 +679,13 @@ function VehicleForm({
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
     setError("");
+    setFieldErrors({});
     const form = new FormData(event.currentTarget);
     const photoUrls = String(form.get("photoUrls") ?? "")
       .split(",").map((url) => url.trim()).filter(Boolean);
@@ -707,12 +709,14 @@ function VehicleForm({
       providerType: nullableText(form, "providerType"),
       providerName: nullableText(form, "providerName"),
       assignedWasherName: nullableText(form, "assignedWasherName"),
-      status: String(form.get("status")),
+      // The status control only exists when editing; never send a missing value.
+      ...(form.has("status") ? { status: String(form.get("status")) } : {}),
     };
     try {
       await onSave(input);
     } catch (saveError) {
       setError(errorMessage(saveError));
+      setFieldErrors(saveError instanceof ApiError ? saveError.fieldErrors : {});
     } finally {
       setSaving(false);
     }
@@ -730,7 +734,7 @@ function VehicleForm({
           <div className="form-section-title"><span>01</span><div><h2>Vehicle details</h2><p>A few details help keep each vehicle distinct.</p></div></div>
           <div className="form-grid">
             <label>Vehicle type <select name="type" defaultValue={vehicle?.type ?? "FOUR_WHEELER"} required><option value="TWO_WHEELER">Two-wheeler</option><option value="FOUR_WHEELER">Four-wheeler</option><option value="OTHER">Other vehicle</option></select></label>
-            <label>Registration number <input name="registrationNumber" defaultValue={vehicle?.registrationNumber ?? ""} autoComplete="off" maxLength={32} placeholder="e.g. MH 12 AB 1234" required /><small>Spaces and hyphens are ignored when checking for duplicates.</small></label>
+            <label>Registration number <input name="registrationNumber" aria-invalid={Boolean(fieldErrors.registrationNumber)} defaultValue={vehicle?.registrationNumber ?? ""} autoComplete="off" maxLength={32} placeholder="e.g. MH 12 AB 1234" required /><small>Spaces and hyphens are ignored when checking for duplicates.</small></label>
             <label>Make <input name="make" defaultValue={vehicle?.make ?? ""} maxLength={80} placeholder="e.g. Honda" /></label>
             <label>Model <input name="model" defaultValue={vehicle?.model ?? ""} maxLength={80} placeholder="e.g. City" /></label>
           </div>
@@ -765,7 +769,18 @@ function VehicleForm({
           </div>
         </div>
 
-        {error && <div className="form-error" role="alert">{error}</div>}
+        {error && (
+          <div className="form-error" role="alert">
+            {error}
+            {Object.keys(fieldErrors).length > 0 && (
+              <ul>
+                {Object.entries(fieldErrors).map(([field, messages]) => (
+                  <li key={field}>{messages.join("; ")}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
         <div className="form-actions">
           <button className="secondary-button" type="button" onClick={onCancel} disabled={saving}>Cancel</button>
           <button className="primary-button" type="submit" disabled={saving}>{saving ? "Saving…" : vehicle ? "Save changes" : "Add vehicle"} <Icon name="arrow-up-right" size={16} /></button>

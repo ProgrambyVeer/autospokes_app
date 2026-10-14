@@ -28,6 +28,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly fieldErrors: Record<string, string[]> = {},
   ) {
     super(message);
     this.name = "ApiError";
@@ -42,13 +43,18 @@ function csrfCookie(): string | null {
 async function responseBody<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let message = "Something went wrong. Please try again.";
+    let fieldErrors: Record<string, string[]> = {};
     try {
-      const body = (await response.json()) as { message?: string };
+      const body = (await response.json()) as {
+        message?: string;
+        fieldErrors?: Record<string, string[]>;
+      };
       if (body.message) message = body.message;
+      if (body.fieldErrors) fieldErrors = body.fieldErrors;
     } catch {
       // Retain the generic error message when the response has no JSON body.
     }
-    throw new ApiError(message, response.status);
+    throw new ApiError(message, response.status, fieldErrors);
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
