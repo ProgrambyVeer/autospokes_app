@@ -1,0 +1,410 @@
+import cookie from "@fastify/cookie";
+import jwt from "@fastify/jwt";
+import rateLimit from "@fastify/rate-limit";
+import { verify } from "@node-rs/argon2";
+import {
+  HealthResponseSchema,
+  AccountIdSchema,
+  LoginSchema,
+  RegisterSchema,
+  type ApiRole,
+} from "@autospokes/shared";
+import Fastify, {
+  type FastifyReply,
+  type FastifyRequest,
+  type preHandlerHookHandler,
+} from "fastify";
+import type { AuthRepository, SessionRecord } from "./auth/repository.js";
+import {
+  ACCESS_TOKEN_TTL_SECONDS,
+  CSRF_COOKIE,
+  DUMMY_PASSWORD_HASH,
+  REFRESH_COOKIE,
+  REFRESH_TOKEN_TTL_MS,
+  createOpaqueToken,
+  hashOpaqueToken,
+  hashPassword,
+  matchesSecret,
+} from "./auth/security.js";
+
+type AccessClaims = {
+  sub: string;
+  sid: string;
+  aid: string | null;
+  pid: string;
+  role: ApiRole;
+};
+
+declare module "@fastify/jwt" {
+  interface FastifyJWT {
+    payload: AccessClaims;
+    user: AccessClaims;
+  }
+}
+
+declare module "fastify" {
+  interface FastifyInstance {
+    authenticate: preHandlerHookHandler;
+  }
+}
+
+type BuildAppOptions = {
+  authRepository: AuthRepository;
+  jwtSecret: string;
+  nodeEnv: string;
+};
+
+const AUTH_RATE_LIMIT = {
+  max: 5,
+  timeWindow: 15 * 60 * 1000,
+};
+
+function refreshCookieOptions(secure: boolean) {
+  return {
+    httpOnly: true,
+    secure,
+    sameSite: "strict" as const,
+    path: "/auth",
+    maxAge: REFRESH_TOKEN_TTL_MS / 1000,
+  };
+}
+
+function csrfCookieOptions(secure: boolean) {
+  return {
+    httpOnly: false,
+    secure,
+    sameSite: "strict" as const,
+    path: "/auth",
+    maxAge: REFRESH_TOKEN_TTL_MS / 1000,
+  };
+}
+
+function httpError(statusCode: number, message: string): Error & { statusCode: number } {
+  return Object.assign(new Error(message), { statusCode });
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "P2002"
+  );
+}
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function setAuthCookies(
+  reply: FastifyReply,
+  refreshToken: string,
+  csrfToken: string,
+  secure: boolean,
+): void {
+  reply.setCookie(REFRESH_COOKIE, refreshToken, refreshCookieOptions(secure));
+  reply.setCookie(CSRF_COOKIE, csrfToken, csrfCookieOptions(secure));
+}
+
+function clearAuthCookies(reply: FastifyReply): void {
+  const secure = process.env.NODE_ENV === "production";
+  reply.clearCookie(REFRESH_COOKIE, { path: "/auth", sameSite: "strict", secure });
+  reply.clearCookie(CSRF_COOKIE, { path: "/auth", sameSite: "strict", secure });
+}
+
+function requireCsrf(request: FastifyRequest): void {
+  const header = request.headers["x-csrf-token"];
+  const supplied = Array.isArray(header) ? header[0] : header;
+  if (!matchesSecret(request.cookies[CSRF_COOKIE], supplied)) {
+    throw httpError(403, "A valid CSRF token is required");
+  }
+}
+
+function publicSession(session: SessionRecord) {
+  return {
+    id: session.userId,
+    email: session.email,
+    role: session.role,
+    displayName: session.displayName,
+    accountId: session.accountId,
+  };
+}
+
+async function issueSession(
+  reply: FastifyReply,
+  repository: AuthRepository,
+  jwtSign: (claims: AccessClaims) => string,
+  secureCookies: boolean,
+  input: {
+    userId: string;
+    roleProfileId: string;
+    accountId: string | null;
+  },
+) {
+  const refreshToken = createOpaqueToken();
+  const csrfToken = createOpaqueToken();
+  const session = await repository.createSession({
+    ...input,
+    refreshTokenHash: hashOpaqueToken(refreshToken),
+    expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
+  });
+  const accessToken = jwtSign({
+    sub: session.userId,
+    sid: session.id,
+    aid: session.accountId,
+    pid: session.roleProfileId,
+    role: session.role,
+  });
+  setAuthCookies(reply, refreshToken, csrfToken, secureCookies);
+  return {
+    accessToken,
+    tokenType: "Bearer",
+    expiresIn: ACCESS_TOKEN_TTL_SECONDS,
+    csrfToken,
+    user: publicSession(session),
+  };
+}
+
+export function buildApp({ authRepository, jwtSecret, nodeEnv }: BuildAppOptions) {
+  if (jwtSecret.length < 32) {
+    throw new Error("JWT_SECRET must contain at least 32 characters");
+  }
+
+  const app = Fastify({ logger: nodeEnv !== "test" });
+  const dummyPasswordHash = DUMMY_PASSWORD_HASH;
+  const secureCookies = nodeEnv === "production";
+
+  app.register(cookie);
+  app.register(jwt, { secret: jwtSecret });
+  app.register(rateLimit, { global: false });
+
+  app.decorate("authenticate", async (request) => {
+    try {
+      await request.jwtVerify();
+    } catch {
+      throw httpError(401, "Authentication required");
+    }
+
+    const claims = request.user;
+    const session = await authRepository.findSessionById(claims.sid);
+    if (
+      !session ||
+      session.revokedAt ||
+      session.expiresAt.getTime() <= Date.now() ||
+      session.userStatus !== "ACTIVE" ||
+      session.userId !== claims.sub ||
+      session.roleProfileId !== claims.pid ||
+      session.accountId !== claims.aid ||
+      session.role !== claims.role
+    ) {
+      throw httpError(401, "Authentication required");
+    }
+  });
+
+  const requireRole =
+    (...roles: ApiRole[]): preHandlerHookHandler =>
+    async (request) => {
+      if (!roles.includes(request.user.role)) {
+        throw httpError(403, "This role is not allowed to access this resource");
+      }
+    };
+
+  app.get("/health", async () =>
+    HealthResponseSchema.parse({
+      status: "ok",
+      service: "autospokes-api",
+    }),
+  );
+
+  app.post<{ Body: unknown }>(
+    "/auth/register",
+    { config: { rateLimit: AUTH_RATE_LIMIT } },
+    async (request, reply) => {
+      if (nodeEnv !== "development") {
+        throw httpError(404, "Not found");
+      }
+
+      const parsed = RegisterSchema.safeParse(request.body);
+      if (!parsed.success) throw httpError(400, "Invalid registration details");
+
+      const input = parsed.data;
+      try {
+        const user = await authRepository.createDeveloperUser({
+          email: normalizeEmail(input.email),
+          passwordHash: await hashPassword(input.password),
+          role: input.role,
+          displayName: input.displayName,
+        });
+        const profile = user.profiles.find((item) => item.role === input.role);
+        if (!profile) throw new Error("Created account is missing its role profile");
+        await authRepository.appendAuditEvent({
+          actorId: user.id,
+          accountId: profile.accountId,
+          action: "AUTH_REGISTERED",
+          ipAddress: request.ip,
+        });
+        return reply.code(201).send(
+          await issueSession(
+            reply,
+            authRepository,
+            (claims) => app.jwt.sign(claims, { expiresIn: ACCESS_TOKEN_TTL_SECONDS }),
+            secureCookies,
+            {
+              userId: user.id,
+              roleProfileId: profile.id,
+              accountId: profile.accountId,
+            },
+          ),
+        );
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          throw httpError(409, "An account with that email already exists");
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post<{ Body: unknown }>(
+    "/auth/login",
+    { config: { rateLimit: AUTH_RATE_LIMIT } },
+    async (request, reply) => {
+      const parsed = LoginSchema.safeParse(request.body);
+      if (!parsed.success) throw httpError(400, "Invalid login details");
+
+      const input = parsed.data;
+      const email = normalizeEmail(input.email);
+      const user = await authRepository.findCredentialByEmail(email);
+      const passwordMatches = await verify(
+        user?.passwordHash ?? (await dummyPasswordHash),
+        input.password,
+      );
+      const profile = user?.profiles.find(
+        (candidate) => !input.role || candidate.role === input.role,
+      );
+      if (!user || !passwordMatches || user.status !== "ACTIVE" || !profile) {
+        await authRepository.appendAuditEvent({
+          actorId: user?.id,
+          action: "AUTH_LOGIN_FAILED",
+          details: { reason: "invalid_credentials" },
+          ipAddress: request.ip,
+        });
+        throw httpError(401, "Invalid email or password");
+      }
+
+      await authRepository.appendAuditEvent({
+        actorId: user.id,
+        accountId: profile.accountId,
+        action: "AUTH_LOGIN_SUCCEEDED",
+        ipAddress: request.ip,
+      });
+      return issueSession(
+        reply,
+        authRepository,
+        (claims) => app.jwt.sign(claims, { expiresIn: ACCESS_TOKEN_TTL_SECONDS }),
+        secureCookies,
+        { userId: user.id, roleProfileId: profile.id, accountId: profile.accountId },
+      );
+    },
+  );
+
+  app.post("/auth/refresh", { config: { rateLimit: AUTH_RATE_LIMIT } }, async (request, reply) => {
+    requireCsrf(request);
+    const token = request.cookies[REFRESH_COOKIE];
+    if (!token) throw httpError(401, "Refresh session is not available");
+
+    const nextToken = createOpaqueToken();
+    const session = await authRepository.rotateRefreshToken({
+      currentHash: hashOpaqueToken(token),
+      nextHash: hashOpaqueToken(nextToken),
+      expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
+      now: new Date(),
+    });
+    if (!session || session.userStatus !== "ACTIVE") {
+      if (session) await authRepository.revokeSession(session.id, new Date());
+      clearAuthCookies(reply);
+      throw httpError(401, "Refresh session is invalid or expired");
+    }
+
+    const csrfToken = createOpaqueToken();
+    const accessToken = app.jwt.sign(
+      {
+        sub: session.userId,
+        sid: session.id,
+        aid: session.accountId,
+        pid: session.roleProfileId,
+        role: session.role,
+      },
+      { expiresIn: ACCESS_TOKEN_TTL_SECONDS },
+    );
+    setAuthCookies(reply, nextToken, csrfToken, secureCookies);
+    await authRepository.appendAuditEvent({
+      actorId: session.userId,
+      accountId: session.accountId,
+      action: "AUTH_REFRESHED",
+      ipAddress: request.ip,
+    });
+    return {
+      accessToken,
+      tokenType: "Bearer",
+      expiresIn: ACCESS_TOKEN_TTL_SECONDS,
+      csrfToken,
+      user: publicSession(session),
+    };
+  });
+
+  app.post(
+    "/auth/logout",
+    { preHandler: [app.authenticate], config: { rateLimit: AUTH_RATE_LIMIT } },
+    async (request, reply) => {
+      requireCsrf(request);
+      await authRepository.revokeSession(request.user.sid, new Date());
+      await authRepository.appendAuditEvent({
+        actorId: request.user.sub,
+        accountId: request.user.aid,
+        action: "AUTH_LOGGED_OUT",
+        ipAddress: request.ip,
+      });
+      clearAuthCookies(reply);
+      return reply.code(204).send();
+    },
+  );
+
+  app.get(
+    "/auth/me",
+    { preHandler: [app.authenticate] },
+    async (request) => ({
+      id: request.user.sub,
+      role: request.user.role,
+      accountId: request.user.aid,
+    }),
+  );
+
+  app.get<{ Params: { accountId: string } }>(
+    "/accounts/:accountId",
+    { preHandler: [app.authenticate] },
+    async (request) => {
+      const accountId = AccountIdSchema.safeParse(request.params.accountId);
+      if (!accountId.success) throw httpError(400, "Invalid account id");
+      if (
+        request.user.role !== "SUPERADMIN" &&
+        request.user.aid !== accountId.data
+      ) {
+        throw httpError(404, "Account not found");
+      }
+      const account = await authRepository.findAccountById(accountId.data);
+      if (!account) throw httpError(404, "Account not found");
+      return { id: account.id, name: account.name };
+    },
+  );
+
+  app.get(
+    "/admin/audit-events",
+    {
+      preHandler: [app.authenticate, requireRole("SUPERADMIN")],
+    },
+    async () => ({ events: await authRepository.listAuditEvents() }),
+  );
+
+  return app;
+}

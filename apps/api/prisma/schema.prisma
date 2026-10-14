@@ -1,0 +1,97 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  OWNER
+  INDEPENDENT_DETAILER
+  SOCIETY_VENDOR
+  MARKETPLACE_VENDOR
+  SUPERADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+model User {
+  id           String        @id @default(uuid()) @db.Uuid
+  email        String        @unique @db.VarChar(254)
+  passwordHash String        @db.VarChar(255)
+  status       UserStatus    @default(ACTIVE)
+  createdAt    DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime      @updatedAt @db.Timestamptz(6)
+  account      Account?      @relation("AccountOwner")
+  profiles     RoleProfile[]
+  sessions     Session[]
+  auditEvents  AuditEvent[]  @relation("AuditActor")
+}
+
+model Account {
+  id          String        @id @default(uuid()) @db.Uuid
+  name        String        @db.VarChar(120)
+  ownerId     String        @unique @db.Uuid
+  createdAt   DateTime      @default(now()) @db.Timestamptz(6)
+  owner       User          @relation("AccountOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  profiles    RoleProfile[]
+  sessions    Session[]
+  auditEvents AuditEvent[]
+}
+
+model RoleProfile {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  accountId   String?   @db.Uuid
+  role        UserRole
+  displayName String    @db.VarChar(80)
+  profileData Json      @default("{}")
+  createdAt   DateTime  @default(now()) @db.Timestamptz(6)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account     Account?  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  sessions    Session[]
+
+  @@unique([id, userId])
+  @@unique([userId, role])
+  @@index([accountId, role])
+}
+
+model Session {
+  id               String      @id @default(uuid()) @db.Uuid
+  userId           String      @db.Uuid
+  roleProfileId    String      @db.Uuid
+  accountId        String?     @db.Uuid
+  refreshTokenHash String      @unique @db.Char(64)
+  expiresAt        DateTime    @db.Timestamptz(6)
+  revokedAt        DateTime?   @db.Timestamptz(6)
+  createdAt        DateTime    @default(now()) @db.Timestamptz(6)
+  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleProfile      RoleProfile @relation(fields: [roleProfileId, userId], references: [id, userId], onDelete: Cascade)
+  account          Account?    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([accountId])
+  @@index([expiresAt])
+}
+
+model AuditEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  actorId   String?  @db.Uuid
+  accountId String?  @db.Uuid
+  action    String   @db.VarChar(80)
+  details   Json?
+  ipAddress String?  @db.VarChar(64)
+  userAgent String?  @db.VarChar(512)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  actor     User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  account   Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  @@index([accountId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+}

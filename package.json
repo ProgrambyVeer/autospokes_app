@@ -1,0 +1,43 @@
+{
+  "name": "autospokes",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm:dev --workspace @autospokes/api\" \"npm:dev --workspace @autospokes/web\"",
+    "build": "npm run build --workspace @autospokes/shared && npm run build --workspace @autospokes/api && npm run build --workspace @autospokes/web",
+    "lint": "eslint .",
+    "test": "npm run prisma:generate --workspace @autospokes/api && npm run build --workspace @autospokes/shared && vitest run",
+    "db:generate": "npm run prisma:generate --workspace @autospokes/api",
+    "db:verify": "npm run prisma:generate --workspace @autospokes/api && npm run db:verify --workspace @autospokes/api",
+    "db:migrate": "npm run prisma:generate --workspace @autospokes/api && npm run db:verify --workspace @autospokes/api && npm run prisma:migrate:deploy --workspace @autospokes/api",
+    "bootstrap:superadmin": "npm run prisma:generate --workspace @autospokes/api && npm run db:verify --workspace @autospokes/api && npm run bootstrap:superadmin --workspace @autospokes/api"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.25.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.0.12",
+    "@types/react-dom": "^19.0.4",
+    "@vitejs/plugin-react": "^4.4.1",
+    "concurrently": "^9.1.2",
+    "eslint": "^9.25.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^16.0.0",
+    "jsdom": "^26.0.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.29.1",
+    "vite": "^6.2.5",
+    "vitest": "^4.1.11"
+  },
+  "engines": {
+    "node": ">=20",
+    "npm": ">=10"
+  }
+}

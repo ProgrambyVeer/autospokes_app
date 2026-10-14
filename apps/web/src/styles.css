@@ -1,0 +1,210 @@
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
+:root {
+  font-family: "Aptos", "Segoe UI", sans-serif;
+  color: #17191c;
+  background: #f6f7f8;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-optical-sizing: auto;
+}
+
+* { box-sizing: border-box; }
+body { min-width: 360px; min-height: 100vh; margin: 0; }
+button, a { font: inherit; }
+button { color: inherit; }
+
+.sidebar {
+  position: fixed; inset: 0 auto 0 0; z-index: 5; display: flex; width: 258px;
+  flex-direction: column; padding: 27px 17px 16px; background: #fff;
+  border-right: 1px solid #eceef0;
+}
+.brand, .mobile-brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: #141618; }
+.brand { padding: 0 7px; }
+.brand-mark { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 11px; color: #fff; background: #151719; }
+.brand-word { font: 800 19px/1 "Aptos Display", "Segoe UI", sans-serif; letter-spacing: -1.15px; }
+.brand-word span { font-weight: 500; }
+.workspace-label { margin: 41px 8px 13px; color: #a0a6ad; font-size: 9px; font-weight: 700; letter-spacing: 1.25px; }
+.role-list { display: grid; gap: 4px; }
+.role-button { position: relative; display: flex; min-height: 53px; align-items: center; gap: 10px; padding: 7px 9px; border: 0; border-radius: 9px; background: transparent; text-align: left; cursor: pointer; transition: background .18s ease; }
+.role-button:hover { background: #f7f8f9; }
+.role-active { background: #f4f6f8; }
+.role-icon { display: grid; width: 31px; height: 31px; flex: 0 0 31px; place-items: center; border-radius: 8px; color: #77808a; background: #fff; border: 1px solid #eceef0; }
+.role-active .role-icon { color: #3268e8; background: #fff; }
+.role-copy, .profile-copy { display: grid; min-width: 0; gap: 3px; }
+.role-copy > span:first-child { overflow: hidden; color: #3b4046; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.role-active .role-copy > span:first-child { color: #17191c; }
+.role-descriptor, .profile-copy small { color: #9299a1; font-size: 9px; }
+.active-dot { width: 5px; height: 5px; margin-left: auto; border-radius: 50%; background: #3268e8; }
+.sidebar-divider { height: 1px; margin: 24px 5px 0; background: #eef0f2; }
+.nav-label { margin-top: 24px; }
+.nav-list { display: grid; gap: 4px; }
+.nav-item { display: flex; height: 41px; align-items: center; gap: 11px; padding: 0 11px; border: 0; border-radius: 8px; color: #838b94; background: transparent; text-align: left; font-size: 11px; cursor: pointer; transition: .18s ease; }
+.nav-item:hover { color: #24282d; background: #f7f8f9; }
+.nav-active, .nav-active:hover { color: #1a1d21; background: #f2f4f6; font-weight: 600; }
+.nav-active svg { color: #3268e8; }
+.nav-count { display: grid; width: 19px; height: 19px; margin-left: auto; place-items: center; border-radius: 6px; color: #78818a; background: #fff; font-size: 9px; }
+.sidebar-bottom { margin-top: auto; }
+.help-card { display: flex; align-items: center; gap: 9px; margin: 0 2px 15px; padding: 12px 10px; border: 1px solid #eff0f2; border-radius: 10px; color: #88919a; }
+.help-icon { display: grid; width: 29px; height: 29px; flex: 0 0 29px; place-items: center; border-radius: 8px; color: #3268e8; background: #eef3ff; }
+.help-card > span:nth-child(2) { display: grid; flex: 1; gap: 3px; }
+.help-card strong { color: #434950; font-size: 10px; font-weight: 600; }
+.help-card small { color: #969da5; font-size: 9px; }
+.profile { display: flex; width: 100%; align-items: center; gap: 9px; padding: 12px 3px 1px; border: 0; border-top: 1px solid #eff0f2; background: transparent; text-align: left; cursor: pointer; }
+.avatar, .top-avatar { display: grid; flex: 0 0 auto; place-items: center; border-radius: 50%; color: #4e5967; background: #e6e9ed; font-size: 9px; font-weight: 700; }
+.avatar { width: 33px; height: 33px; }
+.profile-copy { flex: 1; }
+.profile-copy strong { color: #343a40; font-size: 10px; font-weight: 600; }
+.profile > svg { color: #939ba3; }
+
+.main-area { min-height: 100vh; margin-left: 258px; }
+.topbar { display: flex; height: 69px; align-items: center; justify-content: space-between; padding: 0 49px; border-bottom: 1px solid #e9ebed; background: rgba(255,255,255,.79); }
+.breadcrumb, .top-actions { display: flex; align-items: center; }
+.breadcrumb { gap: 9px; color: #a1a7ad; font-size: 10px; }
+.breadcrumb strong { color: #3e444a; font-weight: 600; }
+.top-actions { gap: 16px; }
+.icon-button { position: relative; display: grid; width: 31px; height: 31px; place-items: center; border: 0; border-radius: 8px; color: #7b838b; background: transparent; cursor: pointer; }
+.icon-button:hover { background: #f2f4f6; }
+.notification-dot { position: absolute; top: 6px; right: 6px; width: 5px; height: 5px; border: 1px solid #fff; border-radius: 50%; background: #3268e8; }
+.top-divider { width: 1px; height: 24px; background: #e7e9ec; }
+.top-avatar { width: 30px; height: 30px; font-size: 8px; }
+.mobile-brand { display: none; }
+.mobile-controls { display: none; }
+.page-content { width: min(100%, 1114px); min-height: calc(100vh - 69px); margin: 0 auto; padding: 36px 49px 18px; }
+.eyebrow, .section-kicker { color: #939ba3; font-size: 9px; font-weight: 700; letter-spacing: 1.2px; }
+.eyebrow { display: flex; align-items: center; gap: 8px; }
+.eyebrow-line { display: inline-block; width: 15px; height: 1px; background: #3268e8; }
+.welcome-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 22px; margin-top: 23px; }
+.section-kicker { margin: 0 0 10px; }
+.date-dot { padding: 0 4px; color: #3268e8; }
+h1, h2, p { margin-top: 0; }
+.welcome-row h1 { margin: 0; color: #191b1e; font: 700 clamp(28px, 3.1vw, 39px)/1.17 "Aptos Display", "Segoe UI", sans-serif; letter-spacing: -1.9px; }
+.welcome-row h1 span { color: #a7adb3; }
+.welcome-copy { max-width: 440px; margin: 12px 0 0; color: #858d95; font-size: 11px; line-height: 1.7; }
+.primary-button { display: flex; height: 39px; flex: 0 0 auto; align-items: center; gap: 8px; padding: 0 13px; border: 0; border-radius: 7px; color: #fff; background: #17191c; font-size: 10px; font-weight: 600; cursor: pointer; transition: background .2s, transform .2s; }
+.primary-button:hover { transform: translateY(-1px); background: #3268e8; }
+.primary-button svg:last-child { margin-left: 5px; color: #c2cad3; }
+.hero-card { position: relative; display: flex; min-height: 232px; overflow: hidden; align-items: center; margin-top: 29px; border-radius: 12px; color: #fff; background: #171a1e; box-shadow: 0 13px 35px rgba(22,27,33,.12); }
+.hero-copy { position: relative; z-index: 2; width: 54%; padding: 26px 0 25px 29px; }
+.hero-tag { display: flex; align-items: center; gap: 7px; color: #bbc2cb; font-size: 8px; font-weight: 600; letter-spacing: 1.05px; }
+.hero-tag-dot { width: 5px; height: 5px; border-radius: 50%; background: #6c97ff; box-shadow: 0 0 10px #4978ed; }
+.hero-copy h2 { margin: 14px 0 9px; font: 700 28px/1.1 "Aptos Display", "Segoe UI", sans-serif; letter-spacing: -1.1px; }
+.hero-copy > p { max-width: 300px; margin: 0; color: #9ba4ae; font-size: 10px; line-height: 1.7; }
+.hero-link { display: inline-flex; align-items: center; gap: 9px; margin-top: 15px; padding: 0 0 3px; border: 0; border-bottom: 1px solid #5d6774; color: #fff; background: transparent; font-size: 9px; font-weight: 600; cursor: pointer; }
+.hero-link svg { color: #89a9ff; }
+.hero-art { position: absolute; inset: 0 0 0 48%; overflow: hidden; }
+.art-glow { position: absolute; inset: 0; background: radial-gradient(ellipse at 68% 45%, rgba(58,82,126,.33), transparent 53%); }
+.art-orbit { position: absolute; width: 240px; height: 240px; top: -84px; right: 40px; border: 1px solid rgba(198,211,236,.09); border-radius: 50%; }
+.orbit-two { width: 310px; height: 310px; top: -125px; right: 7px; }
+.art-sun { position: absolute; top: 28px; right: 81px; width: 70px; height: 70px; border-radius: 50%; background: radial-gradient(circle at 40% 36%, #a7bbdf, #566d93 62%, rgba(50,69,100,.24)); box-shadow: 0 0 38px rgba(114,148,205,.22); }
+.art-road { position: absolute; right: -20px; bottom: -60px; width: 470px; height: 132px; border: 1px solid rgba(183,198,223,.13); border-radius: 50% 50% 0 0; background: linear-gradient(180deg, rgba(69,83,105,.34), rgba(29,34,41,.2)); transform: perspective(150px) rotateX(26deg); }
+.art-road::after { position: absolute; inset: 24px 0 0; border-top: 1px dashed rgba(202,214,233,.2); border-radius: 50% 50% 0 0; content: ""; }
+.art-car { position: absolute; right: 83px; bottom: 27px; color: #d8dfeb; filter: drop-shadow(0 8px 12px rgba(130,161,215,.3)); transform: scaleX(1.45); }
+.art-car svg { stroke-width: .72; }
+.art-caption { position: absolute; right: 18px; bottom: 12px; color: #8895aa; font-size: 7px; letter-spacing: 1.3px; }
+.overview-grid { margin-top: 26px; }
+.section-heading, .panel-heading { display: flex; align-items: center; justify-content: space-between; }
+.section-heading .section-kicker, .panel-heading .section-kicker { margin-bottom: 4px; }
+.section-heading h2, .panel-heading h2 { margin: 0; color: #282c30; font: 700 16px/1.3 "Aptos Display", "Segoe UI", sans-serif; letter-spacing: -.4px; }
+.quiet-button { display: flex; align-items: center; gap: 7px; padding: 7px 9px; border: 1px solid #e7e9ec; border-radius: 6px; color: #737c84; background: rgba(255,255,255,.7); font-size: 9px; cursor: pointer; }
+.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 13px; }
+.stat-card { min-height: 126px; padding: 14px 15px; border: 1px solid #eaeced; border-radius: 9px; background: rgba(255,255,255,.78); transition: transform .18s, box-shadow .18s; }
+.stat-card:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(18,24,32,.05); }
+.stat-top { display: flex; align-items: center; justify-content: space-between; }
+.stat-icon { display: grid; width: 29px; height: 29px; place-items: center; border: 1px solid #eaeced; border-radius: 8px; color: #59636e; background: #fff; }
+.stat-period { color: #afb4ba; font-size: 7px; font-weight: 700; letter-spacing: .8px; }
+.stat-value { margin-top: 10px; color: #282b2e; font: 700 21px/1 "Aptos Display", "Segoe UI", sans-serif; letter-spacing: -.8px; }
+.stat-label { margin-top: 5px; color: #4e555c; font-size: 9px; font-weight: 600; }
+.stat-note { margin-top: 3px; color: #a0a6ad; font-size: 8px; }
+.lower-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 12px; margin-top: 15px; }
+.panel { min-width: 0; padding: 15px; border: 1px solid #eaeced; border-radius: 9px; background: rgba(255,255,255,.78); }
+.panel-heading h2 { font-size: 14px; }
+.round-button { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid #e8eaec; border-radius: 7px; color: #67717a; background: #fff; cursor: pointer; }
+.vehicle-detail { display: flex; min-height: 65px; align-items: center; gap: 11px; margin-top: 12px; padding: 10px; border: 1px dashed #e4e7e9; border-radius: 7px; }
+.vehicle-visual { position: relative; display: grid; width: 52px; height: 42px; flex: 0 0 52px; place-items: center; overflow: hidden; border-radius: 6px; color: #697787; background: linear-gradient(145deg, #eef1f4, #e5e9ed); }
+.vehicle-visual svg { position: relative; z-index: 1; width: 38px; }
+.vehicle-shine { position: absolute; top: -10px; right: 5px; width: 17px; height: 60px; background: rgba(255,255,255,.5); transform: rotate(28deg); }
+.vehicle-info { display: grid; min-width: 0; flex: 1; gap: 4px; }
+.vehicle-info strong, .care-row strong { color: #4a5158; font-size: 9px; font-weight: 600; }
+.vehicle-info > span, .care-row > div > span { color: #9ca3aa; font-size: 8px; }
+.text-button { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; color: #3268e8; background: transparent; font-size: 9px; font-weight: 600; cursor: pointer; }
+.add-link { white-space: nowrap; }
+.new-pill { padding: 4px 6px; border-radius: 4px; color: #3268e8; background: #eef3ff; font-size: 7px; font-weight: 700; letter-spacing: .7px; }
+.care-row { display: flex; align-items: center; gap: 9px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #eff0f2; }
+.care-icon { display: grid; width: 31px; height: 31px; flex: 0 0 31px; place-items: center; border-radius: 8px; color: #707b88; background: #f1f3f5; }
+.care-icon-blue { color: #3268e8; background: #edf2ff; }
+.care-row > div { display: grid; flex: 1; gap: 4px; }
+.care-row > svg { color: #a3aab0; }
+.page-footer { display: flex; justify-content: space-between; gap: 15px; margin-top: 25px; color: #a5abb1; font-size: 8px; }
+.footer-separator { padding: 0 3px; color: #3268e8; }
+.placeholder-panel { display: flex; min-height: 390px; flex-direction: column; align-items: flex-start; justify-content: center; padding: 30px; border: 1px solid #eaeced; border-radius: 12px; background: #fff; }
+.placeholder-icon { display: grid; width: 45px; height: 45px; margin-bottom: 20px; place-items: center; border-radius: 12px; color: #3268e8; background: #eef3ff; }
+.placeholder-panel h1 { margin: 0; font: 700 30px "Aptos Display", "Segoe UI", sans-serif; letter-spacing: -1px; }
+.placeholder-panel > p:not(.section-kicker) { max-width: 400px; margin: 10px 0 18px; color: #858d95; font-size: 12px; line-height: 1.7; }
+
+@media (min-width: 1500px) {
+  .page-content { padding-top: 45px; }
+  .hero-card { min-height: 260px; }
+  .stat-card { min-height: 139px; }
+}
+@media (max-width: 1100px) {
+  .sidebar { width: 224px; padding-right: 13px; padding-left: 13px; }
+  .main-area { margin-left: 224px; }
+  .topbar { padding: 0 30px; }
+  .page-content { padding: 32px 30px 18px; }
+  .role-copy > span:first-child { font-size: 10px; }
+  .lower-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .sidebar { display: none; }
+  .main-area { margin-left: 0; }
+  .topbar { height: 59px; padding: 0 20px; }
+  .mobile-brand { display: flex; }
+  .mobile-brand .brand-mark { width: 30px; height: 30px; }
+  .mobile-brand .brand-word { font-size: 17px; }
+  .mobile-controls { display: grid; gap: 1px; overflow: hidden; border-bottom: 1px solid #e9ebed; background: #fff; }
+  .mobile-workspace, .mobile-navigation { display: flex; gap: 5px; overflow-x: auto; padding: 7px 14px; scrollbar-width: none; }
+  .mobile-workspace::-webkit-scrollbar, .mobile-navigation::-webkit-scrollbar { display: none; }
+  .mobile-role, .mobile-nav-item { display: flex; height: 31px; flex: 0 0 auto; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid transparent; border-radius: 6px; color: #79828b; background: transparent; font-size: 9px; cursor: pointer; }
+  .mobile-role-active { border-color: #e9edf4; color: #3268e8; background: #f5f7fb; font-weight: 600; }
+  .mobile-navigation { padding-top: 0; }
+  .mobile-nav-item { height: 28px; color: #89919a; }
+  .mobile-nav-active { color: #23272b; background: #f2f4f6; font-weight: 600; }
+  .breadcrumb { display: none; }
+  .top-actions { gap: 8px; }
+  .search-button, .top-divider { display: none; }
+  .page-content { min-height: calc(100vh - 59px); padding: 27px 20px 18px; }
+  .welcome-row { align-items: flex-start; flex-direction: column; }
+  .welcome-row h1 { font-size: clamp(29px, 7vw, 37px); }
+  .welcome-copy { max-width: 380px; }
+  .hero-card { min-height: 250px; }
+  .hero-copy { width: 70%; padding-left: 21px; }
+  .hero-art { left: 37%; opacity: .74; }
+  .art-car { right: 20px; }
+  .art-sun { right: 36px; }
+  .art-orbit { right: -30px; }
+  .orbit-two { right: -62px; }
+  .stat-grid { grid-template-columns: 1fr; gap: 8px; }
+  .stat-card { display: grid; min-height: 78px; grid-template-columns: 34px 1fr auto; grid-template-rows: 1fr 1fr; align-items: center; column-gap: 10px; padding: 10px 12px; }
+  .stat-top { display: contents; }
+  .stat-icon { grid-column: 1; grid-row: 1 / 3; }
+  .stat-period { display: none; }
+  .stat-value { grid-column: 2; grid-row: 1; margin: 0; font-size: 18px; }
+  .stat-label { grid-column: 2; grid-row: 2; margin: 0; }
+  .stat-note { grid-column: 3; grid-row: 1 / 3; margin: 0; text-align: right; }
+  .lower-grid { grid-template-columns: 1fr; }
+  .page-footer { flex-direction: column; gap: 6px; margin-top: 20px; }
+}
+@media (max-width: 430px) {
+  .topbar { padding: 0 14px; }
+  .page-content { padding-right: 14px; padding-left: 14px; }
+  .hero-copy { width: 84%; padding-left: 17px; }
+  .hero-copy h2 { font-size: 25px; }
+  .hero-tag { font-size: 7px; }
+  .hero-art { left: 35%; opacity: .56; }
+  .vehicle-detail { flex-wrap: wrap; }
+  .add-link { margin-left: 63px; }
+}
