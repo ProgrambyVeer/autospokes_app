@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { buildApp } from "./app.js";
 import { PrismaAuthRepository } from "./auth/prisma-repository.js";
 import { verifyDedicatedDatabase } from "./database.js";
+import { PrismaOwnerRepository } from "./owner/prisma-repository.js";
 
 const port = Number(process.env.PORT ?? 3001);
 const host = process.env.HOST ?? "127.0.0.1";
@@ -23,6 +24,7 @@ const prisma = new PrismaClient();
 await verifyDedicatedDatabase(prisma);
 const app = buildApp({
   authRepository: new PrismaAuthRepository(prisma),
+  ownerRepository: new PrismaOwnerRepository(prisma),
   jwtSecret,
   nodeEnv,
 });

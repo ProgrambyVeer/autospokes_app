@@ -20,6 +20,23 @@ enum UserStatus {
   DISABLED
 }
 
+enum VehicleType {
+  TWO_WHEELER
+  FOUR_WHEELER
+  OTHER
+}
+
+enum VehicleStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum VehicleProviderType {
+  INDEPENDENT_WASHER
+  SOCIETY_VENDOR
+  MARKETPLACE_VENDOR
+}
+
 model User {
   id           String        @id @default(uuid()) @db.Uuid
   email        String        @unique @db.VarChar(254)
@@ -42,6 +59,35 @@ model Account {
   profiles    RoleProfile[]
   sessions    Session[]
   auditEvents AuditEvent[]
+  vehicles    Vehicle[]
+}
+
+model Vehicle {
+  id                          String              @id @default(uuid()) @db.Uuid
+  accountId                   String              @db.Uuid
+  type                        VehicleType
+  registrationNumber          String              @db.VarChar(32)
+  registrationNumberNormalized String             @unique @db.VarChar(32)
+  make                        String?             @db.VarChar(80)
+  model                       String?             @db.VarChar(80)
+  lengthCm                    Float?
+  widthCm                     Float?
+  heightCm                    Float?
+  photoUrls                   String[]            @default([])
+  locationName                String?             @db.VarChar(100)
+  address                     String?             @db.VarChar(240)
+  city                        String?             @db.VarChar(100)
+  postalCode                  String?             @db.VarChar(24)
+  providerType                VehicleProviderType?
+  providerName                String?             @db.VarChar(120)
+  assignedWasherName          String?             @db.VarChar(120)
+  status                      VehicleStatus       @default(ACTIVE)
+  createdAt                   DateTime            @default(now()) @db.Timestamptz(6)
+  updatedAt                   DateTime            @updatedAt @db.Timestamptz(6)
+  account                     Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([id, accountId])
+  @@index([accountId, status, createdAt])
 }
 
 model RoleProfile {

@@ -5,8 +5,12 @@ import { verify } from "@node-rs/argon2";
 import {
   HealthResponseSchema,
   AccountIdSchema,
+  CreateVehicleSchema,
   LoginSchema,
+  OwnerProfileUpdateSchema,
   RegisterSchema,
+  UpdateVehicleSchema,
+  normalizeRegistrationNumber,
   type ApiRole,
 } from "@autospokes/shared";
 import Fastify, {
@@ -15,6 +19,7 @@ import Fastify, {
   type preHandlerHookHandler,
 } from "fastify";
 import type { AuthRepository, SessionRecord } from "./auth/repository.js";
+import type { OwnerRepository } from "./owner/repository.js";
 import {
   ACCESS_TOKEN_TTL_SECONDS,
   CSRF_COOKIE,
@@ -50,6 +55,7 @@ declare module "fastify" {
 
 type BuildAppOptions = {
   authRepository: AuthRepository;
+  ownerRepository: OwnerRepository;
   jwtSecret: string;
   nodeEnv: string;
 };
@@ -74,7 +80,7 @@ function csrfCookieOptions(secure: boolean) {
     httpOnly: false,
     secure,
     sameSite: "strict" as const,
-    path: "/auth",
+    path: "/",
     maxAge: REFRESH_TOKEN_TTL_MS / 1000,
   };
 }
@@ -109,7 +115,7 @@ function setAuthCookies(
 function clearAuthCookies(reply: FastifyReply): void {
   const secure = process.env.NODE_ENV === "production";
   reply.clearCookie(REFRESH_COOKIE, { path: "/auth", sameSite: "strict", secure });
-  reply.clearCookie(CSRF_COOKIE, { path: "/auth", sameSite: "strict", secure });
+  reply.clearCookie(CSRF_COOKIE, { path: "/", sameSite: "strict", secure });
 }
 
 function requireCsrf(request: FastifyRequest): void {
@@ -165,7 +171,7 @@ async function issueSession(
   };
 }
 
-export function buildApp({ authRepository, jwtSecret, nodeEnv }: BuildAppOptions) {
+export function buildApp({ authRepository, ownerRepository, jwtSecret, nodeEnv }: BuildAppOptions) {
   if (jwtSecret.length < 32) {
     throw new Error("JWT_SECRET must contain at least 32 characters");
   }
@@ -208,6 +214,14 @@ export function buildApp({ authRepository, jwtSecret, nodeEnv }: BuildAppOptions
         throw httpError(403, "This role is not allowed to access this resource");
       }
     };
+
+  const ownerAccountId = (request: FastifyRequest): string => {
+    if (request.user.role !== "OWNER" || !request.user.aid) {
+      throw httpError(403, "An owner account is required");
+    }
+    return request.user.aid;
+  };
+  const ownerOnly = [app.authenticate, requireRole("OWNER")];
 
   app.get("/health", async () =>
     HealthResponseSchema.parse({
@@ -395,6 +409,164 @@ export function buildApp({ authRepository, jwtSecret, nodeEnv }: BuildAppOptions
       const account = await authRepository.findAccountById(accountId.data);
       if (!account) throw httpError(404, "Account not found");
       return { id: account.id, name: account.name };
+    },
+  );
+
+  app.get(
+    "/owner/profile",
+    { preHandler: ownerOnly },
+    async (request) => {
+      const profile = await ownerRepository.findOwnerProfile(
+        request.user.pid,
+        ownerAccountId(request),
+      );
+      if (!profile) throw httpError(404, "Owner profile not found");
+      return {
+        displayName: profile.displayName,
+        phoneNumber: profile.phoneNumber,
+      };
+    },
+  );
+
+  app.patch<{ Body: unknown }>(
+    "/owner/profile",
+    { preHandler: ownerOnly },
+    async (request) => {
+      const parsed = OwnerProfileUpdateSchema.safeParse(request.body);
+      if (!parsed.success) throw httpError(400, "Invalid owner profile details");
+      const profile = await ownerRepository.updateOwnerProfile(
+        request.user.pid,
+        ownerAccountId(request),
+        parsed.data,
+      );
+      if (!profile) throw httpError(404, "Owner profile not found");
+      return {
+        displayName: profile.displayName,
+        phoneNumber: profile.phoneNumber,
+      };
+    },
+  );
+
+  app.get(
+    "/owner/vehicles",
+    { preHandler: ownerOnly },
+    async (request) => ({
+      vehicles: await ownerRepository.listVehicles(ownerAccountId(request)),
+    }),
+  );
+
+  app.post<{ Body: unknown }>(
+    "/owner/vehicles",
+    { preHandler: ownerOnly },
+    async (request, reply) => {
+      const parsed = CreateVehicleSchema.safeParse(request.body);
+      if (!parsed.success) throw httpError(400, "Invalid vehicle details");
+      const input = parsed.data;
+      if (
+        input.providerType !== "SOCIETY_VENDOR" &&
+        input.assignedWasherName
+      ) {
+        throw httpError(400, "An assigned washer is only valid for a Society Vendor");
+      }
+      try {
+        const vehicle = await ownerRepository.createVehicle(ownerAccountId(request), {
+          ...input,
+          registrationNumber: input.registrationNumber.trim(),
+          registrationNumberNormalized: normalizeRegistrationNumber(input.registrationNumber),
+          providerName: input.providerType ? input.providerName ?? null : null,
+          assignedWasherName:
+            input.providerType === "SOCIETY_VENDOR" ? input.assignedWasherName ?? null : null,
+        });
+        return reply.code(201).send(vehicle);
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          throw httpError(
+            409,
+            "This registration number needs ownership verification before it can be registered",
+          );
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.get<{ Params: { vehicleId: string } }>(
+    "/owner/vehicles/:vehicleId",
+    { preHandler: ownerOnly },
+    async (request) => {
+      const vehicleId = AccountIdSchema.safeParse(request.params.vehicleId);
+      if (!vehicleId.success) throw httpError(400, "Invalid vehicle id");
+      const vehicle = await ownerRepository.findVehicle(
+        ownerAccountId(request),
+        vehicleId.data,
+      );
+      if (!vehicle) throw httpError(404, "Vehicle not found");
+      return {
+        vehicle,
+        serviceSummary: {
+          upcomingService: null,
+          currentWashStatus: null,
+          recentServiceHistory: [],
+          invoices: null,
+        },
+      };
+    },
+  );
+
+  app.patch<{ Params: { vehicleId: string }; Body: unknown }>(
+    "/owner/vehicles/:vehicleId",
+    { preHandler: ownerOnly },
+    async (request) => {
+      const vehicleId = AccountIdSchema.safeParse(request.params.vehicleId);
+      if (!vehicleId.success) throw httpError(400, "Invalid vehicle id");
+      const accountId = ownerAccountId(request);
+      const existing = await ownerRepository.findVehicle(accountId, vehicleId.data);
+      if (!existing) throw httpError(404, "Vehicle not found");
+
+      const parsed = UpdateVehicleSchema.safeParse(request.body);
+      if (!parsed.success) throw httpError(400, "Invalid vehicle details");
+      const input = parsed.data;
+      const nextProvider = input.providerType !== undefined
+        ? input.providerType
+        : existing.providerType;
+      if (
+        nextProvider !== "SOCIETY_VENDOR" &&
+        input.assignedWasherName
+      ) {
+        throw httpError(400, "An assigned washer is only valid for a Society Vendor");
+      }
+
+      const update: typeof input & { registrationNumberNormalized?: string } = {
+        ...input,
+      };
+      if (input.registrationNumber !== undefined) {
+        update.registrationNumber = input.registrationNumber.trim();
+        update.registrationNumberNormalized = normalizeRegistrationNumber(
+          input.registrationNumber,
+        );
+      }
+      if (input.providerType !== undefined && input.providerType !== "SOCIETY_VENDOR") {
+        update.assignedWasherName = null;
+      }
+      if (nextProvider === null) {
+        update.providerName = null;
+      } else if (input.providerName !== undefined) {
+        update.providerName = input.providerName;
+      }
+
+      try {
+        const vehicle = await ownerRepository.updateVehicle(accountId, vehicleId.data, update);
+        if (!vehicle) throw httpError(404, "Vehicle not found");
+        return vehicle;
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          throw httpError(
+            409,
+            "This registration number needs ownership verification before it can be registered",
+          );
+        }
+        throw error;
+      }
     },
   );
 

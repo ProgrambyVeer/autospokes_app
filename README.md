@@ -3,8 +3,9 @@
 Autospokes is a vehicle-care platform foundation. Phase 1 established the npm
 workspaces and responsive product shell. Phase 2 adds PostgreSQL/Prisma
 persistence, authentication, role authorization, account isolation, and an
-auditable one-time Superadmin bootstrap. Bookings, payments, and other business
-workflows are not part of these phases.
+auditable one-time Superadmin bootstrap. Phase 3 adds the owner profile and
+private vehicle garage. Provider workflows, service bookings, payments, and
+other business workflows are not part of these phases.
 
 ## Requirements
 
@@ -102,9 +103,12 @@ Open the Vite URL printed in the terminal (normally
 `http://localhost:5173`). The API health endpoint is
 `http://127.0.0.1:3001/health`.
 
-The API loads `apps\api\.env`; Vite reads `apps\web\.env`. Override a setting
-for one PowerShell session by setting `$env:PORT` or `$env:VITE_API_BASE_URL`
-before starting the corresponding app.
+The API loads `apps\api\.env`; Vite reads `apps\web\.env`. In development, Vite
+proxies same-origin `/auth` and `/owner` requests to `http://127.0.0.1:3001`.
+For one PowerShell session, set `$env:PORT` before starting the API if its port
+needs to change; update the proxy target in `apps\web\vite.config.ts` to match.
+In a deployment, route those same paths through the hosting reverse proxy to
+the API so refresh and CSRF cookies remain same-origin.
 
 ## Authentication foundation
 
@@ -145,6 +149,45 @@ Also set `NODE_ENV=production` in the deployed API environment; registration is
 disabled outside development. After a production bootstrap, remove the
 temporary credentials and disable the one-time bootstrap flag.
 
+## Owner app
+
+Sign in from the web UI with an existing Owner account. In development, the
+sign-in screen can create an account using the existing `POST /auth/register`
+endpoint; the endpoint remains disabled outside `NODE_ENV=development`.
+Refresh sessions use the existing HttpOnly refresh cookie and readable CSRF
+cookie; short-lived access tokens are kept in memory by the web app.
+
+`GET/PATCH /owner/profile`, `GET/POST /owner/vehicles`, and
+`GET/PATCH /owner/vehicles/:vehicleId` require an authenticated Owner role.
+Vehicle reads and edits are scoped by the account ID from the
+database-validated session, never by registration number. Registration numbers
+are compared uppercase with spaces and hyphens removed. A globally unique
+database constraint blocks a duplicate across accounts; a conflict returns
+only a generic ownership-verification message and never identifies the other
+owner. Vehicle registration does not require a provider. Optional provider
+details are owner-entered; they are not verified assignments.
+
+The garage supports two-wheelers, four-wheelers, and other vehicles; optional
+make/model, dimensions, HTTP(S) photo URLs, location, provider, and status;
+profile editing; and a vehicle-specific summary. No service-history,
+wash-status, invoice, or balance data source exists yet, so those sections show
+no records/unavailable states rather than generated transactions. Photos are
+entered as image URLs; direct upload is not available. Independent Detailer,
+Society Vendor, Marketplace Vendor, and Superadmin workflows remain out of
+scope.
+
+Phase 3 adds the non-destructive migration
+`apps\api\prisma\migrations\20261014150000_phase3_owner_vehicles`. It adds
+vehicle types, the owner-scoped vehicle table, normalized registration
+uniqueness, and dimension/provider consistency constraints. No migration is
+run automatically. After configuring and confirming the dedicated database
+described above, apply pending migrations with:
+
+```powershell
+npm run db:verify
+npm run db:migrate
+```
+
 ## Workspace commands
 
 ```powershell
@@ -159,10 +202,6 @@ npm run db:migrate
 - `apps/web` — React, TypeScript, Vite, and Tailwind CSS.
 - `apps/api` — Node.js, TypeScript, and Fastify.
 - `packages/shared` — shared role types and validation schemas.
-
-The interface includes placeholder navigation for Owner, Independent Detailer,
-Society Vendor, Marketplace Vendor, and Superadmin. Authentication endpoints
-are an API foundation only; the UI is not connected to them yet.
 
 ## Configuration and safety
 

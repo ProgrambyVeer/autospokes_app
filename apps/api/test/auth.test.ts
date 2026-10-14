@@ -3,18 +3,21 @@ import { buildApp } from "../src/app.js";
 import { hashPassword } from "../src/auth/security.js";
 import { CSRF_COOKIE, REFRESH_COOKIE } from "../src/auth/security.js";
 import { MemoryAuthRepository } from "./support/memory-auth-repository.js";
+import { MemoryOwnerRepository } from "./support/memory-owner-repository.js";
 
 const activeApps: ReturnType<typeof buildApp>[] = [];
 
 function makeApp(nodeEnv = "development") {
   const repository = new MemoryAuthRepository();
+  const ownerRepository = new MemoryOwnerRepository();
   const app = buildApp({
     authRepository: repository,
+    ownerRepository,
     jwtSecret: "test-only-secret-with-more-than-thirty-two-characters",
     nodeEnv,
   });
   activeApps.push(app);
-  return { app, repository };
+  return { app, repository, ownerRepository };
 }
 
 function responseCookies(response: { headers: Record<string, unknown> }): string {
@@ -63,6 +66,15 @@ describe("authentication and authorization", () => {
     expect(body.accessToken).toBeTypeOf("string");
     expect(responseCookies(response)).toContain(`${REFRESH_COOKIE}=`);
     expect(JSON.stringify(response.headers["set-cookie"])).toMatch(/HttpOnly/);
+    const setCookieHeaders = response.headers["set-cookie"];
+    expect(
+      (Array.isArray(setCookieHeaders) ? setCookieHeaders : [setCookieHeaders]).some(
+        (cookie) =>
+          typeof cookie === "string" &&
+          cookie.startsWith(`${CSRF_COOKIE}=`) &&
+          cookie.includes("Path=/;"),
+      ),
+    ).toBe(true);
 
     const me = await app.inject({
       method: "GET",

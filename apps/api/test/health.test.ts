@@ -1,9 +1,11 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
 import { MemoryAuthRepository } from "./support/memory-auth-repository.js";
+import { MemoryOwnerRepository } from "./support/memory-owner-repository.js";
 
 const app = buildApp({
   authRepository: new MemoryAuthRepository(),
+  ownerRepository: new MemoryOwnerRepository(),
   jwtSecret: "test-only-secret-with-more-than-thirty-two-characters",
   nodeEnv: "test",
 });
