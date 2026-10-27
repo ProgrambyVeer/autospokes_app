@@ -381,3 +381,169 @@ export type DailyTask = {
   locationName: string | null;
   clientName: string;
 };
+
+// ---------------------------------------------------------------------------
+// Society Vendor
+// ---------------------------------------------------------------------------
+
+export const SocietyProfileUpdateSchema = z.object({
+  displayName: z.string().trim().min(1).max(80).optional(),
+  phoneNumber: IndianPhoneSchema.optional(),
+  contactEmail: z.string().trim().email().max(254).optional().nullable(),
+}).strict().refine((value) => Object.keys(value).length > 0);
+
+export const SocietyInputSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  address: optionalLabel(240),
+}).strict();
+export const SocietyUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  address: optionalLabel(240),
+  status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
+}).strict().refine((value) => Object.keys(value).length > 0);
+
+export const SocietyResidentInputSchema = z.object({
+  societyId: z.string().uuid(),
+  name: z.string().trim().min(1).max(100),
+  phoneNumber: IndianPhoneSchema,
+  unit: optionalLabel(40),
+  email: z.string().trim().email().max(254).optional().nullable(),
+}).strict();
+export const SocietyResidentUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  phoneNumber: IndianPhoneSchema.optional(),
+  unit: optionalLabel(40),
+  email: z.string().trim().email().max(254).optional().nullable(),
+  status: VehicleStatusSchema.optional(),
+}).strict().refine((value) => Object.keys(value).length > 0);
+
+export const SocietyVehicleInputSchema = z.object({
+  societyId: z.string().uuid(),
+  residentId: z.string().uuid(),
+  type: VehicleTypeSchema,
+  registrationNumber: RegistrationNumberSchema,
+  monthlyRatePaise: z.number().int().min(0).max(100_000_000),
+}).strict();
+export const SocietyVehicleUpdateSchema = z.object({
+  type: VehicleTypeSchema.optional(),
+  registrationNumber: RegistrationNumberSchema.optional(),
+  monthlyRatePaise: z.number().int().min(0).max(100_000_000).optional(),
+  status: VehicleStatusSchema.optional(),
+}).strict().refine((value) => Object.keys(value).length > 0);
+
+export const SocietyWasherInputSchema = z.object({
+  societyId: z.string().uuid(),
+  name: z.string().trim().min(1).max(100),
+  phoneNumber: IndianPhoneSchema,
+  ratePerTaskPaise: z.number().int().min(0).max(10_000_000),
+}).strict();
+export const SocietyWasherUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  phoneNumber: IndianPhoneSchema.optional(),
+  ratePerTaskPaise: z.number().int().min(0).max(10_000_000).optional(),
+  status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
+}).strict().refine((value) => Object.keys(value).length > 0);
+
+export const SocietyAssignmentInputSchema = z.object({
+  vehicleId: z.string().uuid(),
+  washerId: z.string().uuid(),
+  startsAt: DateStringSchema,
+}).strict();
+
+export const SocietyAttendanceInputSchema = z.object({
+  societyId: z.string().uuid(),
+  washerId: z.string().uuid(),
+  workDate: DateStringSchema,
+  status: z.enum(["PRESENT", "ABSENT", "LEAVE"]),
+  note: optionalLabel(500),
+}).strict();
+
+export const SocietyTaskQuerySchema = z.object({
+  societyId: z.string().uuid().optional(),
+  date: DateStringSchema.optional(),
+}).strict();
+
+export const SocietyTaskUpdateSchema = z.object({
+  status: z.enum(["COMPLETED", "MISSED", "UNAVAILABLE"]),
+  note: optionalLabel(500),
+}).strict();
+
+export const SocietyScheduleActivitySchema = z.enum([
+  "EXTERIOR_WASH",
+  "INTERIOR_CLEANING",
+  "TYRE_POLISH",
+]);
+export const SocietyWashScheduleInputSchema = z.object({
+  frequency: ScheduleFrequencySchema,
+  weekdays: z.array(z.number().int().min(1).max(7)).max(7).default([]),
+  effectiveFrom: DateStringSchema,
+  effectiveTo: DateStringSchema.nullable().optional(),
+}).strict().superRefine((value, context) => {
+  if (new Set(value.weekdays).size !== value.weekdays.length) {
+    context.addIssue({ code: "custom", path: ["weekdays"], message: "Each weekday can be selected once" });
+  }
+  if (value.frequency === "SELECTED_DAYS" && value.weekdays.length === 0) {
+    context.addIssue({ code: "custom", path: ["weekdays"], message: "Select at least one weekday" });
+  }
+  if (value.effectiveTo && value.effectiveTo < value.effectiveFrom) {
+    context.addIssue({ code: "custom", path: ["effectiveTo"], message: "End date cannot be before the start date" });
+  }
+});
+export const SocietyWashScheduleStatusSchema = z.object({
+  status: z.enum(["ACTIVE", "PAUSED", "STOPPED"]),
+}).strict();
+export type SocietyWashScheduleInput = z.infer<typeof SocietyWashScheduleInputSchema>;
+export type SocietyScheduleActivity = z.infer<typeof SocietyScheduleActivitySchema>;
+
+export const SocietyInvoiceGenerationSchema = z.object({
+  societyId: z.string().uuid(),
+  month: z.string().regex(/^\d{4}-\d{2}$/, "Enter a month as YYYY-MM").refine((value) => {
+    const [year, month] = value.split("-").map(Number);
+    return year >= 2000 && month >= 1 && month <= 12;
+  }, "Enter a valid calendar month"),
+}).strict();
+
+export const SocietyPaymentInputSchema = z.object({
+  amountPaise: z.number().int().positive().max(100_000_000),
+  method: z.enum(["CASH", "UPI", "BANK_TRANSFER", "CHEQUE", "OTHER"]),
+  reference: optionalLabel(120),
+  note: optionalLabel(500),
+}).strict();
+
+export const SocietyReminderInputSchema = z.object({
+  note: optionalLabel(500),
+}).strict();
+
+export const SocietyDeductionInputSchema = z.object({
+  societyId: z.string().uuid(),
+  washerId: z.string().uuid(),
+  amountPaise: z.number().int().positive().max(100_000_000),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const SocietyDeductionDecisionSchema = z.object({
+  decision: z.enum(["APPROVED", "REJECTED"]),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export const SocietyExtraWorkInputSchema = z.object({
+  societyId: z.string().uuid(),
+  residentId: z.string().uuid(),
+  vehicleId: z.string().uuid(),
+  description: z.string().trim().min(1).max(180),
+  amountPaise: z.number().int().nonnegative().max(100_000_000),
+  residentApproverName: z.string().trim().min(1).max(100),
+  consentNote: z.string().trim().min(1).max(500),
+  workDate: DateStringSchema,
+}).strict();
+
+export const SocietyExtraWorkDecisionSchema = z.object({
+  decision: z.enum(["APPROVED", "REJECTED"]),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
+export type SocietyProfileUpdateInput = z.infer<typeof SocietyProfileUpdateSchema>;
+export type SocietyInput = z.infer<typeof SocietyInputSchema>;
+export type SocietyResidentInput = z.infer<typeof SocietyResidentInputSchema>;
+export type SocietyVehicleInput = z.infer<typeof SocietyVehicleInputSchema>;
+export type SocietyWasherInput = z.infer<typeof SocietyWasherInputSchema>;

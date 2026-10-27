@@ -9,6 +9,7 @@ export default defineConfig({
       "/auth": "http://127.0.0.1:3001",
       "/owner": "http://127.0.0.1:3001",
       "/detailer": "http://127.0.0.1:3001",
+      "/society": "http://127.0.0.1:3001",
     },
   },
   test: {

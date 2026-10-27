@@ -25,6 +25,8 @@ import type { AuthRepository, SessionRecord } from "./auth/repository.js";
 import type { OwnerRepository } from "./owner/repository.js";
 import type { DetailerRepository } from "./detailer/repository.js";
 import { registerDetailerRoutes } from "./detailer/routes.js";
+import type { SocietyRepository } from "./society/repository.js";
+import { registerSocietyRoutes } from "./society/routes.js";
 import {
   ACCESS_TOKEN_TTL_SECONDS,
   CSRF_COOKIE,
@@ -62,6 +64,7 @@ type BuildAppOptions = {
   authRepository: AuthRepository;
   ownerRepository: OwnerRepository;
   detailerRepository?: DetailerRepository;
+  societyRepository?: SocietyRepository;
   clock?: () => Date;
   jwtSecret: string;
   nodeEnv: string;
@@ -192,6 +195,7 @@ export function buildApp({
   authRepository,
   ownerRepository,
   detailerRepository,
+  societyRepository,
   clock = () => new Date(),
   jwtSecret,
   nodeEnv,
@@ -627,6 +631,17 @@ export function buildApp({
     registerDetailerRoutes(app, {
       repository: detailerRepository,
       preHandler: [app.authenticate, requireRole("INDEPENDENT_DETAILER")],
+      httpError,
+      validationError,
+      isUniqueConstraintError,
+      now: clock,
+    });
+  }
+
+  if (societyRepository) {
+    registerSocietyRoutes(app, {
+      repository: societyRepository,
+      preHandler: [app.authenticate, requireRole("SOCIETY_VENDOR")],
       httpError,
       validationError,
       isUniqueConstraintError,

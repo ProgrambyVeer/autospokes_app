@@ -104,7 +104,7 @@ Open the Vite URL printed in the terminal (normally
 `http://127.0.0.1:3001/health`.
 
 The API loads `apps\api\.env`; Vite reads `apps\web\.env`. In development, Vite
-proxies same-origin `/auth`, `/owner`, and `/detailer` requests to
+proxies same-origin `/auth`, `/owner`, `/detailer`, and `/society` requests to
 `http://127.0.0.1:3001`.
 For one PowerShell session, set `$env:PORT` before starting the API if its port
 needs to change; update the proxy target in `apps\web\vite.config.ts` to match.
@@ -173,8 +173,8 @@ make/model, dimensions, HTTP(S) photo URLs, location, provider, and status;
 profile editing; and a vehicle-specific summary. No service-history,
 wash-status, invoice, or balance data source exists yet, so those sections show
 no records/unavailable states rather than generated transactions. Photos are
-entered as image URLs; direct upload is not available. Society Vendor,
-Marketplace Vendor, and Superadmin workflows remain out of scope.
+entered as image URLs; direct upload is not available. Society Vendor records
+are stored separately and do not read or modify Owner garages.
 
 Phase 3 adds the non-destructive migration
 `apps\api\prisma\migrations\20261014150000_phase3_owner_vehicles`. It adds
@@ -221,6 +221,31 @@ npm run db:migrate
 `db:migrate` deploys all reviewed pending Prisma migrations; it does not reset
 the database. The Detailer UI requires this migration before its persisted API
 screens can be used.
+
+## Society Vendor
+
+The Society Vendor role uses the existing development-only registration and
+session flow. Registration remains disabled outside development. Vendors can
+maintain their profile and societies, vendor-scoped residents and vehicles,
+washers and historical assignments, daily attendance and wash tasks, monthly
+per-vehicle plan invoices, manually recorded partial payments, internal-only
+payment reminders, completed-task washer earnings, approved deductions, and
+resident-consented add-on work. Reminders are records only; no SMS, WhatsApp,
+or payment provider is configured. Society vehicles are separate from both
+Owner vehicles and Independent Detailer vehicles. Each vehicle can have
+independent exterior wash, interior cleaning, and tyre polish schedules with
+daily or selected-weekday frequency. Only active schedules due on the selected
+Asia/Kolkata date generate tasks; paused and stopped schedules do not.
+
+The additive Phase 5 migrations are:
+
+- `apps\api\prisma\migrations\20261101120000_phase5_society_vendor`
+- `apps\api\prisma\migrations\20261102100000_phase5_society_wash_schedules`
+
+Both are recorded as applied in the local `autospokes` database. They have not
+been applied in any other environment. The schedule migration depends on the
+first Phase 5 migration. For any other environment, review both SQL files and
+verify the target database before running `npm run db:migrate`.
 
 ## Workspace commands
 

@@ -19,6 +19,7 @@ import {
 } from "./api";
 import { Icon } from "./components/Icon";
 import { DetailerWorkspace } from "./DetailerApp";
+import { SocietyWorkspace } from "./SocietyApp";
 
 type OwnerPage = "Overview" | "My vehicles" | "Profile" | "Vehicle detail";
 
@@ -71,6 +72,9 @@ function App() {
   if (session.user.role !== "OWNER") {
     if (session.user.role === "INDEPENDENT_DETAILER") {
       return <DetailerWorkspace session={session} onSignOut={() => setSession(null)} />;
+    }
+    if (session.user.role === "SOCIETY_VENDOR") {
+      return <SocietyWorkspace session={session} onSignOut={() => setSession(null)} />;
     }
     return (
       <main className="auth-page">
@@ -139,10 +143,14 @@ function SignIn({
           {registering
             ? role === "OWNER"
               ? "Create an Owner account and start building your private garage."
-              : "Create a Detailer account to manage your clients and daily care."
+              : role === "INDEPENDENT_DETAILER"
+                ? "Create a Detailer account to manage your clients and daily care."
+                : "Create a Society Vendor account to coordinate residents, washers and service."
             : role === "OWNER"
               ? "Sign in to see your vehicles and keep their care in one place."
-              : "Sign in to manage your clients, schedules and daily tasks."}
+              : role === "INDEPENDENT_DETAILER"
+                ? "Sign in to manage your clients, schedules and daily tasks."
+                : "Sign in to manage your societies, service and billing."}
         </p>
         <form className="owner-form auth-form" onSubmit={submit}>
           <label>
@@ -156,6 +164,7 @@ function SignIn({
             >
               <option value="OWNER">Owner</option>
               <option value="INDEPENDENT_DETAILER">Independent Detailer</option>
+              <option value="SOCIETY_VENDOR">Society Vendor</option>
             </select>
           </label>
           {registering && (
@@ -185,7 +194,7 @@ function SignIn({
             {submitting
               ? "Please wait…"
               : registering
-                ? `Create ${role === "OWNER" ? "Owner" : "Detailer"} account`
+                ? `Create ${role === "OWNER" ? "Owner" : role === "INDEPENDENT_DETAILER" ? "Detailer" : "Society Vendor"} account`
                 : "Sign in"}
             {!submitting && <Icon name="arrow-up-right" size={16} />}
           </button>
@@ -200,7 +209,9 @@ function SignIn({
                 setError("");
               }}
             >
-              {registering ? "Sign in" : `Create a ${role === "OWNER" ? "Owner" : "Detailer"} account`}
+              {registering
+                ? "Sign in"
+                : `Create a ${role === "OWNER" ? "Owner" : role === "INDEPENDENT_DETAILER" ? "Detailer" : "Society Vendor"} account`}
             </button>
           </p>
         )}

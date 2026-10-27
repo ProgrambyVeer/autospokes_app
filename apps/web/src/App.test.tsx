@@ -2,6 +2,8 @@ import {
   CreateDetailerClientSchema,
   CreateDetailerVehicleSchema,
   CreateVehicleSchema,
+  SocietyResidentInputSchema,
+  SocietyVehicleInputSchema,
 } from "@autospokes/shared";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -27,6 +29,15 @@ const detailerSession = {
     email: "detailer@example.test",
     role: "INDEPENDENT_DETAILER",
     displayName: "Morgan Detailer",
+  },
+};
+const societySession = {
+  ...session,
+  user: {
+    ...session.user,
+    email: "society@example.test",
+    role: "SOCIETY_VENDOR",
+    displayName: "Morgan Society",
   },
 };
 
@@ -184,6 +195,96 @@ describe("Independent Detailer experience", () => {
           serviceArea: "Indiranagar",
           contactEmail: null,
           onboardingComplete: true,
+        });
+
+        describe("Society Vendor experience", () => {
+          it("routes to Society Vendor navigation and keeps its form payloads aligned with shared schemas", async () => {
+            const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+              const path = String(input);
+              if (path === "/auth/login") return jsonResponse(societySession);
+              if (path === "/society/profile") {
+                return jsonResponse({
+                  displayName: "Morgan Society",
+                  phoneNumber: "+919876543210",
+                  contactEmail: null,
+                  onboardingComplete: true,
+                });
+              }
+              if (path === "/society/societies") return jsonResponse({ societies: [] });
+              throw new Error(`Unexpected request: ${path}`);
+            });
+            vi.stubGlobal("fetch", fetchMock);
+            render(<App />);
+
+            await screen.findByRole("textbox", { name: "Email address" });
+            fireEvent.change(screen.getByRole("textbox", { name: "Email address" }), {
+              target: { value: "society@example.test" },
+            });
+            fireEvent.change(screen.getByLabelText("Password"), {
+              target: { value: "correct-horse-battery-staple" },
+            });
+            fireEvent.change(screen.getByLabelText("Workspace"), { target: { value: "SOCIETY_VENDOR" } });
+            fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+            expect(await screen.findByRole("heading", { name: "Your societies" })).toBeInTheDocument();
+            expect(screen.getByRole("navigation", { name: "Society Vendor navigation" })).toBeInTheDocument();
+            fireEvent.click(screen.getAllByRole("button", { name: "Residents & vehicles" })[0]!);
+            expect(await screen.findByRole("heading", { name: "Residents & vehicles" })).toBeInTheDocument();
+            expect(SocietyResidentInputSchema.safeParse({
+              societyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              name: "Resident",
+              phoneNumber: "9876543210",
+            }).success).toBe(true);
+            expect(SocietyVehicleInputSchema.safeParse({
+              societyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              residentId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+              type: "FOUR_WHEELER",
+              registrationNumber: "MH 12 AB 1234",
+              monthlyRatePaise: 125000,
+            }).success).toBe(true);
+            expect(fetchMock).toHaveBeenCalledWith("/auth/login", expect.objectContaining({
+              method: "POST",
+            }));
+          });
+
+          it("shows failed society saves as errors instead of success", async () => {
+            const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+              const path = String(input);
+              if (path === "/auth/login") return jsonResponse(societySession);
+              if (path === "/society/profile") {
+                return jsonResponse({
+                  displayName: "Morgan Society",
+                  phoneNumber: "+919876543210",
+                  contactEmail: null,
+                  onboardingComplete: true,
+                });
+              }
+              if (path === "/society/societies" && (init?.method ?? "GET") === "GET") {
+                return jsonResponse({ societies: [] });
+              }
+              if (path === "/society/societies" && init?.method === "POST") {
+                return jsonResponse({ message: "Society could not be saved" }, 500);
+              }
+              throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${path}`);
+            });
+            vi.stubGlobal("fetch", fetchMock);
+            render(<App />);
+            await screen.findByRole("textbox", { name: "Email address" });
+            fireEvent.change(screen.getByRole("textbox", { name: "Email address" }), {
+              target: { value: "society@example.test" },
+            });
+            fireEvent.change(screen.getByLabelText("Password"), {
+              target: { value: "correct-horse-battery-staple" },
+            });
+            fireEvent.change(screen.getByLabelText("Workspace"), { target: { value: "SOCIETY_VENDOR" } });
+            fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+            await screen.findByRole("heading", { name: "Your societies" });
+            fireEvent.change(screen.getByLabelText("Society name"), { target: { value: "Example Court" } });
+            fireEvent.click(screen.getByRole("button", { name: "Add society" }));
+
+            expect(await screen.findByRole("alert")).toHaveTextContent("Society could not be saved");
+            expect(screen.queryByText("Changes saved.")).not.toBeInTheDocument();
+          });
         });
       }
       if (path === "/detailer/clients" && (init?.method ?? "GET") === "GET") {

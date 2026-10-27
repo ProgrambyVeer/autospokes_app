@@ -68,6 +68,66 @@ enum DailyTaskException {
   DETAILER_ON_LEAVE
 }
 
+enum SocietyStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum SocietyWasherStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum SocietyAttendanceStatus {
+  PRESENT
+  ABSENT
+  LEAVE
+}
+
+enum SocietyTaskActivity {
+  WASH
+  INTERIOR_CLEANING
+  TYRE_POLISH
+}
+
+enum SocietyWashScheduleStatus {
+  ACTIVE
+  PAUSED
+  STOPPED
+}
+
+enum SocietyTaskStatus {
+  SCHEDULED
+  COMPLETED
+  MISSED
+  UNAVAILABLE
+}
+
+enum SocietyInvoiceStatus {
+  ISSUED
+  VOID
+}
+
+enum SocietyPaymentMethod {
+  CASH
+  UPI
+  BANK_TRANSFER
+  CHEQUE
+  OTHER
+}
+
+enum SocietyDeductionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum SocietyExtraWorkStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 model User {
   id           String        @id @default(uuid()) @db.Uuid
   email        String        @unique @db.VarChar(254)
@@ -95,6 +155,19 @@ model Account {
   detailerVehicles DetailerVehicle[]
   washSchedules    WashSchedule[]
   dailyTasks       DailyTask[]
+  societies        Society[]
+  societyResidents SocietyResident[]
+  societyVehicles  SocietyVehicle[]
+  societyWashers   SocietyWasher[]
+  societyAssignments SocietyWasherAssignment[]
+  societyWashSchedules SocietyWashSchedule[]
+  societyAttendance SocietyAttendance[]
+  societyTasks     SocietyWashTask[]
+  societyInvoices SocietyInvoice[]
+  societyPayments SocietyPayment[]
+  societyReminders SocietyPaymentReminder[]
+  societyDeductions SocietyWasherDeduction[]
+  societyExtraWork SocietyExtraWork[]
 }
 
 model Vehicle {
@@ -208,6 +281,304 @@ model DailyTask {
 
   @@unique([vehicleId, taskDate, activity])
   @@index([accountId, taskDate])
+}
+
+model Society {
+  id        String        @id @default(uuid()) @db.Uuid
+  accountId String        @db.Uuid
+  name      String        @db.VarChar(120)
+  address   String?       @db.VarChar(240)
+  status    SocietyStatus @default(ACTIVE)
+  createdAt DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime      @updatedAt @db.Timestamptz(6)
+  account   Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  residents SocietyResident[]
+  vehicles  SocietyVehicle[]
+  washers   SocietyWasher[]
+  assignments SocietyWasherAssignment[]
+  schedules   SocietyWashSchedule[]
+  attendance SocietyAttendance[]
+  tasks     SocietyWashTask[]
+  invoices  SocietyInvoice[]
+  deductions SocietyWasherDeduction[]
+  extraWork SocietyExtraWork[]
+
+  @@unique([id, accountId])
+  @@index([accountId, status, name])
+}
+
+model SocietyResident {
+  id          String          @id @default(uuid()) @db.Uuid
+  accountId   String          @db.Uuid
+  societyId   String          @db.Uuid
+  name        String          @db.VarChar(100)
+  phoneNumber String          @db.VarChar(16)
+  unit        String?         @db.VarChar(40)
+  email       String?         @db.VarChar(254)
+  status      VehicleStatus   @default(ACTIVE)
+  createdAt   DateTime        @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime        @updatedAt @db.Timestamptz(6)
+  account     Account         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  society     Society         @relation(fields: [societyId, accountId], references: [id, accountId], onDelete: NoAction)
+  vehicles    SocietyVehicle[]
+  invoices    SocietyInvoice[]
+  extraWork   SocietyExtraWork[]
+
+  @@unique([id, accountId])
+  @@unique([id, societyId, accountId])
+  @@unique([societyId, accountId, phoneNumber])
+  @@index([accountId, societyId, status, name])
+}
+
+model SocietyWasher {
+  id                 String             @id @default(uuid()) @db.Uuid
+  accountId          String             @db.Uuid
+  societyId          String             @db.Uuid
+  name               String             @db.VarChar(100)
+  phoneNumber        String             @db.VarChar(16)
+  ratePerTaskPaise   Int                @default(0)
+  status             SocietyWasherStatus @default(ACTIVE)
+  createdAt          DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime           @updatedAt @db.Timestamptz(6)
+  account            Account            @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  society            Society            @relation(fields: [societyId, accountId], references: [id, accountId], onDelete: NoAction)
+  assignments        SocietyWasherAssignment[]
+  attendance         SocietyAttendance[]
+  deductions         SocietyWasherDeduction[]
+
+  @@unique([id, societyId, accountId])
+  @@unique([societyId, accountId, phoneNumber])
+  @@index([accountId, societyId, status, name])
+}
+
+model SocietyVehicle {
+  id                           String        @id @default(uuid()) @db.Uuid
+  accountId                    String        @db.Uuid
+  societyId                    String        @db.Uuid
+  residentId                   String        @db.Uuid
+  type                         VehicleType
+  registrationNumber           String        @db.VarChar(32)
+  registrationNumberNormalized String        @db.VarChar(32)
+  monthlyRatePaise             Int
+  status                       VehicleStatus @default(ACTIVE)
+  createdAt                    DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt                    DateTime      @updatedAt @db.Timestamptz(6)
+  account                      Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  society                      Society       @relation(fields: [societyId, accountId], references: [id, accountId], onDelete: NoAction)
+  resident                     SocietyResident @relation(fields: [residentId, societyId, accountId], references: [id, societyId, accountId], onDelete: NoAction)
+  assignments                  SocietyWasherAssignment[]
+  schedules                    SocietyWashSchedule[]
+  tasks                        SocietyWashTask[]
+  extraWork                    SocietyExtraWork[]
+
+  @@unique([id, accountId, societyId])
+  @@unique([id, residentId, societyId, accountId])
+  @@unique([accountId, registrationNumberNormalized])
+  @@index([accountId, societyId, residentId, status])
+}
+
+model SocietyWasherAssignment {
+  id        String        @id @default(uuid()) @db.Uuid
+  accountId String        @db.Uuid
+  societyId String        @db.Uuid
+  vehicleId String        @db.Uuid
+  washerId  String        @db.Uuid
+  startsAt  DateTime      @db.Date
+  endsAt    DateTime?     @db.Date
+  assignedBy String       @db.Uuid
+  createdAt DateTime      @default(now()) @db.Timestamptz(6)
+  account   Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  society   Society       @relation(fields: [societyId, accountId], references: [id, accountId], onDelete: NoAction)
+  vehicle   SocietyVehicle @relation(fields: [vehicleId, accountId, societyId], references: [id, accountId, societyId], onDelete: NoAction)
+  washer    SocietyWasher @relation(fields: [washerId, societyId, accountId], references: [id, societyId, accountId], onDelete: NoAction)
+  tasks     SocietyWashTask[]
+
+  @@unique([id, accountId, vehicleId, washerId])
+  @@index([accountId, societyId, vehicleId, endsAt])
+  @@index([accountId, societyId, washerId, startsAt])
+}
+
+model SocietyWashSchedule {
+  id            String                    @id @default(uuid()) @db.Uuid
+  accountId     String                    @db.Uuid
+  societyId     String                    @db.Uuid
+  vehicleId     String                    @db.Uuid
+  activity      SocietyTaskActivity
+  frequency     ScheduleFrequency
+  weekdays      Int[]                     @default([])
+  effectiveFrom DateTime                  @db.Date
+  effectiveTo   DateTime?                 @db.Date
+  status        SocietyWashScheduleStatus @default(ACTIVE)
+  createdAt     DateTime                  @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime                  @updatedAt @db.Timestamptz(6)
+  account       Account                   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  society       Society                   @relation(fields: [societyId, accountId], references: [id, accountId], onDelete: NoAction)
+  vehicle       SocietyVehicle            @relation(fields: [vehicleId, accountId, societyId], references: [id, accountId, societyId], onDelete: NoAction)
+  tasks         SocietyWashTask[]
+
+  @@unique([vehicleId, activity])
+  @@unique([id, accountId, vehicleId, activity])
+  @@index([accountId, societyId, vehicleId, status])
+  @@index([accountId, status, effectiveFrom, effectiveTo])
+}
+
+model SocietyAttendance {
+  id        String                  @id @default(uuid()) @db.Uuid
+  accountId String                  @db.Uuid
+  societyId String                  @db.Uuid
+  washerId  String                  @db.Uuid
+  workDate  DateTime                @db.Date
+  status    SocietyAttendanceStatus
+  note      String?                 @db.VarChar(500)
+  recordedBy String                 @db.Uuid
+  createdAt DateTime                @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime                @updatedAt @db.Timestamptz(6)
+  account   Account                 @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  society   Society                 @relation(fields: [societyId, accountId], references: [id, accountId], onDelete: NoAction)
+  washer    SocietyWasher           @relation(fields: [washerId, societyId, accountId], references: [id, societyId, accountId], onDelete: NoAction)
+
+  @@unique([washerId, workDate])
+  @@index([accountId, societyId, workDate])
+}
+
+model SocietyWashTask {
+  id                  String              @id @default(uuid()) @db.Uuid
+  accountId           String              @db.Uuid
+  societyId           String              @db.Uuid
+  vehicleId           String              @db.Uuid
+  scheduleId          String?             @db.Uuid
+  assignmentId        String?             @db.Uuid
+  washerId            String?             @db.Uuid
+  activity            SocietyTaskActivity @default(WASH)
+  taskDate            DateTime            @db.Date
+  status              SocietyTaskStatus   @default(SCHEDULED)
+  completedAt         DateTime?           @db.Timestamptz(6)
+  earningRatePaise    Int?
+  note                String?             @db.VarChar(500)
+  completedBy         String?             @db.Uuid
+  createdAt           DateTime            @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime            @updatedAt @db.Timestamptz(6)
+  account             Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  society             Society             @relation(fields: [societyId, accountId], references: [id, accountId], onDelete: NoAction)
+  vehicle             SocietyVehicle      @relation(fields: [vehicleId, accountId, societyId], references: [id, accountId, societyId], onDelete: NoAction)
+  schedule            SocietyWashSchedule? @relation(fields: [scheduleId, accountId, vehicleId, activity], references: [id, accountId, vehicleId, activity], onDelete: NoAction)
+  assignment          SocietyWasherAssignment? @relation(fields: [assignmentId, accountId, vehicleId, washerId], references: [id, accountId, vehicleId, washerId], onDelete: NoAction)
+
+  @@unique([vehicleId, taskDate, activity])
+  @@index([accountId, societyId, taskDate, status])
+  @@index([accountId, societyId, washerId, taskDate])
+}
+
+model SocietyInvoice {
+  id            String              @id @default(uuid()) @db.Uuid
+  accountId     String              @db.Uuid
+  societyId     String              @db.Uuid
+  residentId    String              @db.Uuid
+  monthStart    DateTime            @db.Date
+  dueDate       DateTime            @db.Date
+  totalPaise    Int
+  status        SocietyInvoiceStatus @default(ISSUED)
+  createdBy     String              @db.Uuid
+  createdAt     DateTime            @default(now()) @db.Timestamptz(6)
+  account       Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  society       Society             @relation(fields: [societyId, accountId], references: [id, accountId], onDelete: NoAction)
+  resident      SocietyResident     @relation(fields: [residentId, societyId, accountId], references: [id, societyId, accountId], onDelete: NoAction)
+  lines         SocietyInvoiceLine[]
+  payments      SocietyPayment[]
+  reminders     SocietyPaymentReminder[]
+
+  @@unique([residentId, monthStart])
+  @@unique([id, accountId])
+  @@index([accountId, societyId, monthStart, status])
+}
+
+model SocietyInvoiceLine {
+  id              String        @id @default(uuid()) @db.Uuid
+  accountId       String        @db.Uuid
+  invoiceId       String        @db.Uuid
+  vehicleId       String?       @db.Uuid
+  description     String        @db.VarChar(180)
+  amountPaise     Int
+  createdAt       DateTime      @default(now()) @db.Timestamptz(6)
+  invoice         SocietyInvoice @relation(fields: [invoiceId, accountId], references: [id, accountId], onDelete: Cascade)
+
+  @@unique([invoiceId, vehicleId])
+  @@index([accountId, invoiceId])
+}
+
+model SocietyPayment {
+  id          String               @id @default(uuid()) @db.Uuid
+  accountId   String               @db.Uuid
+  invoiceId   String               @db.Uuid
+  amountPaise Int
+  method      SocietyPaymentMethod
+  reference   String?              @db.VarChar(120)
+  note        String?              @db.VarChar(500)
+  recordedBy  String               @db.Uuid
+  receivedAt  DateTime             @default(now()) @db.Timestamptz(6)
+  createdAt   DateTime             @default(now()) @db.Timestamptz(6)
+  account     Account              @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  invoice     SocietyInvoice       @relation(fields: [invoiceId, accountId], references: [id, accountId], onDelete: NoAction)
+
+  @@index([accountId, invoiceId, receivedAt])
+}
+
+model SocietyPaymentReminder {
+  id          String         @id @default(uuid()) @db.Uuid
+  accountId   String         @db.Uuid
+  invoiceId   String         @db.Uuid
+  note        String?        @db.VarChar(500)
+  createdBy   String         @db.Uuid
+  createdAt   DateTime       @default(now()) @db.Timestamptz(6)
+  account     Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  invoice     SocietyInvoice @relation(fields: [invoiceId, accountId], references: [id, accountId], onDelete: NoAction)
+
+  @@index([accountId, invoiceId, createdAt])
+}
+
+model SocietyWasherDeduction {
+  id          String               @id @default(uuid()) @db.Uuid
+  accountId   String               @db.Uuid
+  societyId   String               @db.Uuid
+  washerId    String               @db.Uuid
+  amountPaise Int
+  reason      String               @db.VarChar(500)
+  status      SocietyDeductionStatus @default(PENDING)
+  decisionReason String?             @db.VarChar(500)
+  requestedBy String               @db.Uuid
+  decidedBy   String?              @db.Uuid
+  decidedAt   DateTime?            @db.Timestamptz(6)
+  createdAt   DateTime             @default(now()) @db.Timestamptz(6)
+  account     Account              @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  society     Society              @relation(fields: [societyId, accountId], references: [id, accountId], onDelete: NoAction)
+  washer      SocietyWasher        @relation(fields: [washerId, societyId, accountId], references: [id, societyId, accountId], onDelete: NoAction)
+
+  @@index([accountId, societyId, washerId, status])
+}
+
+model SocietyExtraWork {
+  id                    String                 @id @default(uuid()) @db.Uuid
+  accountId             String                 @db.Uuid
+  societyId             String                 @db.Uuid
+  residentId            String                 @db.Uuid
+  vehicleId             String                 @db.Uuid
+  description           String                 @db.VarChar(180)
+  amountPaise           Int
+  residentApproverName  String                 @db.VarChar(100)
+  consentNote           String                 @db.VarChar(500)
+  status                SocietyExtraWorkStatus @default(PENDING)
+  decisionReason        String?                @db.VarChar(500)
+  requestedBy           String                 @db.Uuid
+  decidedBy             String?                @db.Uuid
+  decidedAt             DateTime?              @db.Timestamptz(6)
+  workDate              DateTime               @db.Date
+  createdAt             DateTime               @default(now()) @db.Timestamptz(6)
+  account               Account                @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  society               Society                @relation(fields: [societyId, accountId], references: [id, accountId], onDelete: NoAction)
+  resident              SocietyResident        @relation(fields: [residentId, societyId, accountId], references: [id, societyId, accountId], onDelete: NoAction)
+  vehicle               SocietyVehicle         @relation(fields: [vehicleId, residentId, societyId, accountId], references: [id, residentId, societyId, accountId], onDelete: NoAction)
+
+  @@index([accountId, societyId, status, workDate])
 }
 
 model RoleProfile {
