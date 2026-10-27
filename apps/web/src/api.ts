@@ -42,6 +42,38 @@ export type VehicleDashboard = {
   invoices: unknown | null;
 };
 
+export type OwnerServiceStatus = "INACTIVE" | "NO_PROVIDER" | "PROVIDER_RECORDED";
+
+export type OwnerDashboard = {
+  summary: {
+    totalVehicles: number;
+    activeVehicles: number;
+    inactiveVehicles: number;
+    vehiclesWithoutProvider: number;
+    providerCounts: Record<"INDEPENDENT_WASHER" | "SOCIETY_VENDOR" | "MARKETPLACE_VENDOR", number>;
+  };
+  vehicles: {
+    vehicleId: string;
+    serviceStatus: OwnerServiceStatus;
+    providerType: OwnerVehicle["providerType"];
+    providerVerified: false;
+    upcomingService: null;
+    currentWashStatus: null;
+  }[];
+  recentActivity: {
+    id: string;
+    kind: "VEHICLE_ADDED" | "VEHICLE_UPDATED";
+    vehicleId: string;
+    registrationNumber: string;
+    occurredAt: string;
+  }[];
+  availability: {
+    bookings: { available: boolean };
+    billing: { available: boolean };
+    notifications: { available: boolean };
+  };
+};
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -149,6 +181,10 @@ export function updateOwnerProfile(
     method: "PATCH",
     body: JSON.stringify(input),
   });
+}
+
+export function getOwnerDashboard(session: AuthSession): Promise<OwnerDashboard> {
+  return request("/owner/dashboard", session);
 }
 
 export function getVehicles(session: AuthSession): Promise<OwnerVehicle[]> {

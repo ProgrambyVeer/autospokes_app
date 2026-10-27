@@ -18,7 +18,8 @@ export type IconName =
   | "shield"
   | "sparkle"
   | "steering"
-  | "store";
+  | "store"
+  | "user";
 
 const paths: Record<IconName, ReactNode> = {
   arrow: <path d="M5 12h14m-6-6 6 6-6 6" />,
@@ -39,6 +40,7 @@ const paths: Record<IconName, ReactNode> = {
   sparkle: <><path d="m12 3 1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2L12 3Z" /><path d="m19 14 1.1 2.9L23 18l-2.9 1.1L19 22l-1.1-2.9L15 18l2.9-1.1L19 14Z" /></>,
   steering: <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="2.5" /><path d="M4 8h4l2 2m10-2h-4l-2 2m-2 4v7" /></>,
   store: <><path d="M3 10h18l-1.5-6h-15L3 10Z" /><path d="M5 10v10h14V10m-9 10v-6h4v6M3 10a2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0" /></>,
+  user: <><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6" /></>,
 };
 
 export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {

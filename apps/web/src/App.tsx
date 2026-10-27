@@ -1,8 +1,9 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { OwnerVehicle } from "@autospokes/shared";
 import {
   ApiError,
   createVehicle,
+  getOwnerDashboard,
   getOwnerProfile,
   getVehicle,
   getVehicles,
@@ -14,19 +15,24 @@ import {
   updateVehicle,
   type AuthSession,
   type AccountRole,
+  type OwnerDashboard,
   type OwnerProfile,
+  type OwnerServiceStatus,
   type VehicleDashboard,
 } from "./api";
-import { Icon } from "./components/Icon";
+import { Icon, type IconName } from "./components/Icon";
 import { DetailerWorkspace } from "./DetailerApp";
 import { SocietyWorkspace } from "./SocietyApp";
 
-type OwnerPage = "Overview" | "My vehicles" | "Profile" | "Vehicle detail";
+type OwnerPage = "Home" | "My vehicles" | "Services" | "Activity" | "Profile" | "Vehicle detail";
+type DashboardState = "loading" | "ready" | "error";
 
-const pageItems: { label: Exclude<OwnerPage, "Vehicle detail">; icon: "grid" | "car" | "shield" }[] = [
-  { label: "Overview", icon: "grid" },
+const pageItems: { label: Exclude<OwnerPage, "Vehicle detail">; icon: IconName }[] = [
+  { label: "Home", icon: "grid" },
   { label: "My vehicles", icon: "car" },
-  { label: "Profile", icon: "shield" },
+  { label: "Services", icon: "sparkle" },
+  { label: "Activity", icon: "bell" },
+  { label: "Profile", icon: "user" },
 ];
 
 function App() {
@@ -235,7 +241,10 @@ function OwnerWorkspace({
 }) {
   const [profile, setProfile] = useState<OwnerProfile | null>(null);
   const [vehicles, setVehicles] = useState<OwnerVehicle[]>([]);
-  const [page, setPage] = useState<OwnerPage>("Overview");
+  const [page, setPage] = useState<OwnerPage>("Home");
+  const [dashboard, setDashboard] = useState<OwnerDashboard | null>(null);
+  const [dashboardState, setDashboardState] = useState<DashboardState>("loading");
+  const [dashboardRevision, setDashboardRevision] = useState(0);
   const [editingVehicle, setEditingVehicle] = useState<OwnerVehicle | null>(null);
   const [showVehicleForm, setShowVehicleForm] = useState(false);
   const [activeVehicleId, setActiveVehicleId] = useState<string | null>(null);
@@ -265,6 +274,27 @@ function OwnerWorkspace({
       mounted = false;
     };
   }, [session]);
+
+  useEffect(() => {
+    let mounted = true;
+    setDashboardState("loading");
+    getOwnerDashboard(session)
+      .then((result) => {
+        if (!mounted) return;
+        setDashboard(result);
+        setDashboardState("ready");
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setDashboard(null);
+        setDashboardState("error");
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [session, dashboardRevision]);
+
+  const reloadDashboard = useCallback(() => setDashboardRevision((value) => value + 1), []);
 
   useEffect(() => {
     if (page !== "Vehicle detail" || !activeVehicleId) return;
@@ -313,6 +343,7 @@ function OwnerWorkspace({
       setShowVehicleForm(false);
       setEditingVehicle(null);
       setNotice("Vehicle details saved.");
+      reloadDashboard();
     } catch (error) {
       setPageError(errorMessage(error));
       throw error;
@@ -350,7 +381,7 @@ function OwnerWorkspace({
     .split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
 
   return (
-    <div className="owner-app">
+    <div className="owner-app owner-role-app">
       <aside className="owner-sidebar">
         <Brand />
         <p className="workspace-label">YOUR GARAGE</p>
@@ -394,10 +425,13 @@ function OwnerWorkspace({
           {notice && <div className="notice notice-success" role="status">{notice}</div>}
           {loading ? (
             <div className="loading-panel" role="status">Loading your garage…</div>
-          ) : page === "Overview" ? (
+          ) : page === "Home" ? (
             <OwnerOverview
               profile={profile}
               vehicles={vehicles}
+              dashboard={dashboard}
+              dashboardState={dashboardState}
+              onRetryDashboard={reloadDashboard}
               onAddVehicle={addVehicle}
               onNavigate={showPage}
               onOpenVehicle={(id) => {
@@ -418,6 +452,7 @@ function OwnerWorkspace({
             ) : (
               <VehicleList
                 vehicles={vehicles}
+                statuses={dashboard?.vehicles ?? []}
                 onAdd={addVehicle}
                 onEdit={(vehicle) => {
                   setEditingVehicle(vehicle);
@@ -429,6 +464,29 @@ function OwnerWorkspace({
                 }}
               />
             )
+          ) : page === "Services" ? (
+            <ServicesPage
+              vehicles={vehicles}
+              dashboard={dashboard}
+              dashboardState={dashboardState}
+              onRetry={reloadDashboard}
+              onAddVehicle={addVehicle}
+              onEdit={(vehicle) => {
+                setEditingVehicle(vehicle);
+                setShowVehicleForm(true);
+                setPage("My vehicles");
+              }}
+            />
+          ) : page === "Activity" ? (
+            <ActivityPage
+              dashboard={dashboard}
+              dashboardState={dashboardState}
+              onRetry={reloadDashboard}
+              onOpenVehicle={(id) => {
+                setActiveVehicleId(id);
+                setPage("Vehicle detail");
+              }}
+            />
           ) : page === "Profile" ? (
             profile ? (
               <ProfilePage profile={profile} email={session.user.email} onSave={saveProfile} />
@@ -489,25 +547,62 @@ function OwnerNavigation({
   );
 }
 
+function greeting(date = new Date()): string {
+  const hour = date.getHours();
+  return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+}
+
+const statusCopy: Record<OwnerServiceStatus, { label: string; detail: string }> = {
+  INACTIVE: { label: "Inactive", detail: "This vehicle is marked inactive." },
+  NO_PROVIDER: { label: "No provider", detail: "No provider has been recorded for this vehicle." },
+  PROVIDER_RECORDED: { label: "Provider recorded", detail: "Recorded by you. Not verified by Autospokes." },
+};
+
+function activityLabel(kind: OwnerDashboard["recentActivity"][number]["kind"]): string {
+  return kind === "VEHICLE_ADDED" ? "Vehicle added" : "Vehicle details updated";
+}
+
+function formatWhen(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+}
+
+function DashboardUnavailable({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="notice notice-error" role="alert">
+      <span>We could not load your service summary. Your vehicles are still available.</span>
+      <button type="button" onClick={onRetry}>Try again</button>
+    </div>
+  );
+}
+
 function OwnerOverview({
   profile,
   vehicles,
+  dashboard,
+  dashboardState,
+  onRetryDashboard,
   onAddVehicle,
   onNavigate,
   onOpenVehicle,
 }: {
   profile: OwnerProfile | null;
   vehicles: OwnerVehicle[];
+  dashboard: OwnerDashboard | null;
+  dashboardState: DashboardState;
+  onRetryDashboard: () => void;
   onAddVehicle: () => void;
   onNavigate: (page: OwnerPage) => void;
   onOpenVehicle: (id: string) => void;
 }) {
+  const statusById = new Map((dashboard?.vehicles ?? []).map((item) => [item.vehicleId, item.serviceStatus]));
+  const withoutProvider = dashboard?.summary.vehiclesWithoutProvider ?? 0;
   return (
     <>
       <div className="owner-eyebrow"><span className="eyebrow-line" /> YOUR AUTOSPOKES OWNER SPACE</div>
       <section className="owner-welcome">
         <div>
-          <p className="section-kicker">YOUR GARAGE, AT A GLANCE</p>
+          <p className="section-kicker">{greeting().toUpperCase()}{profile?.displayName ? `, ${profile.displayName.toUpperCase()}` : ""}</p>
           <h1>A little more care,<br /><span>for every journey.</span></h1>
           <p className="welcome-copy">
             {profile?.displayName ? `Welcome, ${profile.displayName}. ` : ""}
@@ -519,22 +614,12 @@ function OwnerOverview({
         </button>
       </section>
 
-      <section className="owner-hero">
-        <div className="owner-hero-copy">
-          <span className="hero-tag"><span className="hero-tag-dot" /> YOUR VEHICLES, YOUR SPACE</span>
-          <h2>Good care.<br />No guesswork.</h2>
-          <p>Your garage gives every vehicle its own details, provider and service view.</p>
-          <button type="button" className="hero-link" onClick={() => onNavigate("My vehicles")}>
-            Visit your garage <Icon name="arrow-up-right" size={16} />
-          </button>
-        </div>
-        <div className="owner-hero-art" aria-hidden="true">
-          <span className="owner-orbit owner-orbit-one" />
-          <span className="owner-orbit owner-orbit-two" />
-          <span className="owner-glow" />
-          <span className="owner-art-car"><Icon name="car" size={170} /></span>
-          <span className="owner-road" />
-        </div>
+      {dashboardState === "error" && <DashboardUnavailable onRetry={onRetryDashboard} />}
+
+      <section className="quick-actions" aria-label="Quick actions">
+        <button type="button" onClick={onAddVehicle}><Icon name="plus" size={18} /><span>Add vehicle</span></button>
+        <button type="button" onClick={() => onNavigate("My vehicles")}><Icon name="car" size={18} /><span>View vehicles</span></button>
+        <button type="button" onClick={() => onNavigate("Services")}><Icon name="sparkle" size={18} /><span>Services</span></button>
       </section>
 
       <section className="owner-stats" aria-label="Garage summary">
@@ -558,6 +643,66 @@ function OwnerOverview({
         </article>
       </section>
 
+      {vehicles.length === 0 ? (
+        <section className="owner-section">
+          <div className="owner-section-heading"><div><p className="section-kicker">GETTING STARTED</p><h2>Set up your garage</h2></div></div>
+          <ol className="first-use-steps">
+            <li><strong>Add a vehicle.</strong> Only the registration number is required.</li>
+            <li><strong>Record a provider if you have one.</strong> You can also leave this blank.</li>
+            <li><strong>Return here for updates.</strong> Service, billing and booking details appear only when real records exist.</li>
+          </ol>
+        </section>
+      ) : (
+        <section className="owner-section">
+          <div className="owner-section-heading">
+            <div><p className="section-kicker">SERVICE STATUS</p><h2>Per-vehicle status</h2></div>
+            {dashboardState === "ready" && withoutProvider > 0 && (
+              <span className="status-pill">{withoutProvider} without a provider</span>
+            )}
+          </div>
+          {dashboardState === "loading" ? (
+            <div className="loading-panel" role="status">Loading service status…</div>
+          ) : (
+            <ul className="status-list">
+              {vehicles.slice(0, 6).map((vehicle) => {
+                const status = statusById.get(vehicle.id);
+                return (
+                  <li key={vehicle.id}>
+                    <button type="button" onClick={() => onOpenVehicle(vehicle.id)}>
+                      <span className="registration-chip">{vehicle.registrationNumber}</span>
+                      <span>
+                        <strong>{status ? statusCopy[status].label : "Status unavailable"}</strong>
+                        <small>{status ? statusCopy[status].detail : "Service status could not be loaded."}</small>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {dashboard && dashboard.recentActivity.length > 0 && (
+        <section className="owner-section">
+          <div className="owner-section-heading">
+            <div><p className="section-kicker">RECENT ACTIVITY</p><h2>Latest changes</h2></div>
+            <button className="quiet-button" type="button" onClick={() => onNavigate("Activity")}>
+              View all <Icon name="arrow" size={15} />
+            </button>
+          </div>
+          <ul className="activity-list">
+            {dashboard.recentActivity.slice(0, 3).map((item) => (
+              <li key={item.id}>
+                <strong>{activityLabel(item.kind)}</strong>
+                <span>{item.registrationNumber}</span>
+                <time dateTime={item.occurredAt}>{formatWhen(item.occurredAt)}</time>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section className="owner-section">
         <div className="owner-section-heading">
           <div><p className="section-kicker">IN YOUR GARAGE</p><h2>Your vehicles</h2></div>
@@ -576,7 +721,7 @@ function OwnerOverview({
         ) : (
           <div className="vehicle-card-grid">
             {vehicles.slice(0, 3).map((vehicle) => (
-              <VehicleCard key={vehicle.id} vehicle={vehicle} onOpen={onOpenVehicle} />
+              <VehicleCard key={vehicle.id} vehicle={vehicle} status={statusById.get(vehicle.id)} onOpen={onOpenVehicle} />
             ))}
           </div>
         )}
@@ -585,17 +730,125 @@ function OwnerOverview({
   );
 }
 
+function ServicesPage({
+  vehicles,
+  dashboard,
+  dashboardState,
+  onRetry,
+  onAddVehicle,
+  onEdit,
+}: {
+  vehicles: OwnerVehicle[];
+  dashboard: OwnerDashboard | null;
+  dashboardState: DashboardState;
+  onRetry: () => void;
+  onAddVehicle: () => void;
+  onEdit: (vehicle: OwnerVehicle) => void;
+}) {
+  return (
+    <>
+      <PageHeading
+        eyebrow="SERVICES"
+        title="Services"
+        detail="Provider arrangements you have recorded, and what is not available yet."
+      />
+      {dashboardState === "error" && <DashboardUnavailable onRetry={onRetry} />}
+      <section className="owner-section">
+        <div className="owner-section-heading"><div><p className="section-kicker">PROVIDERS</p><h2>Provider by vehicle</h2></div></div>
+        {vehicles.length === 0 ? (
+          <EmptyState
+            icon="car"
+            title="No vehicles to show."
+            detail="Add a vehicle to record its provider arrangement."
+            action="Add a vehicle"
+            onAction={onAddVehicle}
+          />
+        ) : (
+          <ul className="status-list">
+            {vehicles.map((vehicle) => (
+              <li key={vehicle.id} className="service-row">
+                <span className="registration-chip">{vehicle.registrationNumber}</span>
+                <span>
+                  <strong>{vehicle.providerType ? providerLabel(vehicle.providerType) : "No provider selected"}</strong>
+                  <small>{vehicle.providerType ? "Recorded by you. Not verified by Autospokes." : "No active service."}</small>
+                </span>
+                <button className="text-button" type="button" onClick={() => onEdit(vehicle)}>Edit details</button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <section className="unavailable-grid" aria-label="Not yet available">
+        <article className="detail-card">
+          <h2>Bookings</h2>
+          <p>{dashboard?.availability.bookings.available ? "Bookings are available." : "Booking is not available yet. Nothing is scheduled on your behalf."}</p>
+        </article>
+        <article className="detail-card">
+          <h2>Bills &amp; payments</h2>
+          <p>{dashboard?.availability.billing.available ? "Billing is available." : "No invoice data is available yet. No balances or payments are shown until real billing records exist."}</p>
+        </article>
+      </section>
+    </>
+  );
+}
+
+function ActivityPage({
+  dashboard,
+  dashboardState,
+  onRetry,
+  onOpenVehicle,
+}: {
+  dashboard: OwnerDashboard | null;
+  dashboardState: DashboardState;
+  onRetry: () => void;
+  onOpenVehicle: (id: string) => void;
+}) {
+  return (
+    <>
+      <PageHeading eyebrow="ACTIVITY" title="Activity" detail="Changes recorded on your account." />
+      {dashboardState === "loading" && <div className="loading-panel" role="status">Loading activity…</div>}
+      {dashboardState === "error" && <DashboardUnavailable onRetry={onRetry} />}
+      {dashboardState === "ready" && dashboard && (
+        dashboard.recentActivity.length === 0 ? (
+          <div className="empty-state">
+            <span className="empty-icon"><Icon name="bell" size={23} /></span>
+            <h2>No activity yet.</h2>
+            <p>Changes to your vehicles will appear here.</p>
+          </div>
+        ) : (
+          <ul className="activity-list">
+            {dashboard.recentActivity.map((item) => (
+              <li key={item.id}>
+                <strong>{activityLabel(item.kind)}</strong>
+                <button className="text-button" type="button" onClick={() => onOpenVehicle(item.vehicleId)}>{item.registrationNumber}</button>
+                <time dateTime={item.occurredAt}>{formatWhen(item.occurredAt)}</time>
+              </li>
+            ))}
+          </ul>
+        )
+      )}
+      <article className="detail-card">
+        <h2>Notifications</h2>
+        <p>No notification channel is connected, so Autospokes does not send SMS, WhatsApp, email or push messages.</p>
+      </article>
+    </>
+  );
+}
+
 function VehicleList({
   vehicles,
+  statuses,
   onAdd,
   onEdit,
   onOpen,
 }: {
   vehicles: OwnerVehicle[];
+  statuses: OwnerDashboard["vehicles"];
   onAdd: () => void;
   onEdit: (vehicle: OwnerVehicle) => void;
   onOpen: (id: string) => void;
 }) {
+  const statusById = new Map(statuses.map((item) => [item.vehicleId, item.serviceStatus]));
   return (
     <>
       <PageHeading
@@ -615,7 +868,7 @@ function VehicleList({
       ) : (
         <div className="vehicle-card-grid vehicle-list-grid">
           {vehicles.map((vehicle) => (
-            <VehicleCard key={vehicle.id} vehicle={vehicle} onOpen={onOpen} onEdit={onEdit} />
+            <VehicleCard key={vehicle.id} vehicle={vehicle} status={statusById.get(vehicle.id)} onOpen={onOpen} onEdit={onEdit} />
           ))}
         </div>
       )}
@@ -625,10 +878,12 @@ function VehicleList({
 
 function VehicleCard({
   vehicle,
+  status,
   onOpen,
   onEdit,
 }: {
   vehicle: OwnerVehicle;
+  status?: OwnerServiceStatus;
   onOpen: (id: string) => void;
   onEdit?: (vehicle: OwnerVehicle) => void;
 }) {
@@ -646,6 +901,7 @@ function VehicleCard({
       </button>
       <div className="vehicle-card-foot">
         <span className="provider-summary">{vehicle.providerType ? providerLabel(vehicle.providerType) : "No provider selected"}</span>
+        {status && <span className="status-pill">{statusCopy[status].label}</span>}
         {onEdit && <button className="text-button" type="button" onClick={() => onEdit(vehicle)}>Edit details</button>}
       </div>
     </article>

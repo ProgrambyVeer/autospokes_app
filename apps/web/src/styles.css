@@ -616,3 +616,30 @@ button:disabled { cursor: wait; opacity: .65; }
   .society-inline-form label, .society-inline-form input, .society-inline-form select { width: 100%; }
   .society-app .owner-mobile-nav .owner-nav-item { min-width: max-content; }
 }
+
+/* Phase 6 Owner experience */
+.quick-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0 0 20px; }
+.quick-actions button { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 48px; border: 1px solid #e6e8eb; border-radius: 10px; color: #14181d; background: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
+.quick-actions button:hover { border-color: #14181d; }
+.quick-actions button:focus-visible, .status-list button:focus-visible { outline: 2px solid #2f5fd0; outline-offset: 2px; }
+.status-list, .activity-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.status-list li, .activity-list li { border: 1px solid #e6e8eb; border-radius: 10px; background: #fff; }
+.status-list li > button { display: flex; align-items: center; gap: 14px; width: 100%; padding: 14px 16px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.status-list strong, .status-list small { display: block; }
+.status-list small { margin-top: 2px; color: #68727c; font-size: 12px; }
+.service-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; }
+.service-row .text-button { margin-left: auto; }
+.activity-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 14px 16px; }
+.activity-list time { margin-left: auto; color: #68727c; font-size: 12px; }
+.first-use-steps { display: grid; gap: 10px; margin: 0; padding-left: 20px; color: #3a424a; font-size: 14px; line-height: 1.5; }
+.unavailable-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 20px; }
+
+@media (max-width: 760px) {
+  .owner-role-app .owner-mobile-nav { position: fixed; right: 0; bottom: 0; left: 0; z-index: 30; overflow: visible; border-top: 1px solid #e9ebed; border-bottom: 0; box-shadow: 0 -6px 18px rgba(20, 24, 29, 0.06); }
+  .owner-role-app .owner-mobile-nav .owner-nav { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); width: 100%; gap: 0; padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); }
+  .owner-role-app .owner-mobile-nav .owner-nav-item { flex-direction: column; justify-content: center; min-height: 48px; gap: 3px; padding: 0 2px; font-size: 10px; }
+  .owner-role-app .owner-content { padding-bottom: 88px; }
+  .quick-actions, .unavailable-grid { grid-template-columns: 1fr; }
+  .service-row { flex-wrap: wrap; }
+  .activity-list time { margin-left: 0; }
+}

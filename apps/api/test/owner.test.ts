@@ -390,3 +390,104 @@ describe("owner profile and vehicle operations", () => {
     expect(invalidUpdatedRegistration.statusCode).toBe(400);
   });
 });
+
+describe("owner dashboard", () => {
+  const dashboardUrl = "/owner/dashboard";
+
+  it("requires an authenticated Owner and rejects other roles", async () => {
+    const { app, authRepository, ownerRepository } = createApp();
+    const detailer = await createOwner(app, authRepository, ownerRepository, "dash-detailer@example.test", "INDEPENDENT_DETAILER");
+    const society = await createOwner(app, authRepository, ownerRepository, "dash-society@example.test", "SOCIETY_VENDOR");
+    const anonymous = await app.inject({ method: "GET", url: dashboardUrl });
+    const asDetailer = await app.inject({ method: "GET", url: dashboardUrl, headers: { authorization: detailer.authorization } });
+    const asSociety = await app.inject({ method: "GET", url: dashboardUrl, headers: { authorization: society.authorization } });
+
+    expect(anonymous.statusCode).toBe(401);
+    expect(asDetailer.statusCode).toBe(403);
+    expect(asSociety.statusCode).toBe(403);
+  });
+
+  it("returns an honest empty dashboard for an Owner without vehicles", async () => {
+    const { app, authRepository, ownerRepository } = createApp();
+    const owner = await createOwner(app, authRepository, ownerRepository, "dash-empty@example.test");
+    const response = await app.inject({ method: "GET", url: dashboardUrl, headers: { authorization: owner.authorization } });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      summary: {
+        totalVehicles: 0,
+        activeVehicles: 0,
+        inactiveVehicles: 0,
+        vehiclesWithoutProvider: 0,
+        providerCounts: { INDEPENDENT_WASHER: 0, SOCIETY_VENDOR: 0, MARKETPLACE_VENDOR: 0 },
+      },
+      vehicles: [],
+      recentActivity: [],
+      availability: {
+        bookings: { available: false },
+        billing: { available: false },
+        notifications: { available: false },
+      },
+    });
+  });
+
+  it("keeps per-vehicle status separate across multiple vehicles and never invents service or billing data", async () => {
+    const { app, authRepository, ownerRepository } = createApp();
+    const owner = await createOwner(app, authRepository, ownerRepository, "dash-multi@example.test");
+    const headers = { authorization: owner.authorization };
+    const bare = await app.inject({ method: "POST", url: "/owner/vehicles", headers, payload: { type: "FOUR_WHEELER", registrationNumber: "MH 12 DA 0001" } });
+    const withProvider = await app.inject({
+      method: "POST",
+      url: "/owner/vehicles",
+      headers,
+      payload: { type: "TWO_WHEELER", registrationNumber: "MH 12 DA 0002", providerType: "SOCIETY_VENDOR", providerName: "Test Society", assignedWasherName: "Washer One" },
+    });
+    const inactive = await app.inject({ method: "POST", url: "/owner/vehicles", headers, payload: { type: "OTHER", registrationNumber: "MH 12 DA 0003", providerType: "MARKETPLACE_VENDOR", providerName: "Market" } });
+    await app.inject({ method: "PATCH", url: `/owner/vehicles/${inactive.json().id as string}`, headers, payload: { status: "INACTIVE" } });
+
+    const response = await app.inject({ method: "GET", url: dashboardUrl, headers });
+    const body = response.json();
+    const byId = Object.fromEntries(body.vehicles.map((item: { vehicleId: string }) => [item.vehicleId, item]));
+
+    expect(response.statusCode).toBe(200);
+    expect(body.summary).toMatchObject({
+      totalVehicles: 3,
+      activeVehicles: 2,
+      inactiveVehicles: 1,
+      vehiclesWithoutProvider: 1,
+      providerCounts: { INDEPENDENT_WASHER: 0, SOCIETY_VENDOR: 1, MARKETPLACE_VENDOR: 1 },
+    });
+    expect(byId[bare.json().id]).toMatchObject({ serviceStatus: "NO_PROVIDER", providerType: null, providerVerified: false });
+    expect(byId[withProvider.json().id]).toMatchObject({ serviceStatus: "PROVIDER_RECORDED", providerType: "SOCIETY_VENDOR", providerVerified: false });
+    expect(byId[inactive.json().id]).toMatchObject({ serviceStatus: "INACTIVE" });
+    for (const item of body.vehicles) {
+      expect(item).toMatchObject({ upcomingService: null, currentWashStatus: null });
+    }
+    expect(body.availability).toEqual({
+      bookings: { available: false },
+      billing: { available: false },
+      notifications: { available: false },
+    });
+    expect(body.recentActivity.every((item: { kind: string }) => ["VEHICLE_ADDED", "VEHICLE_UPDATED"].includes(item.kind))).toBe(true);
+    expect(JSON.stringify(body)).not.toMatch(/invoice|balance|paid/i);
+  });
+
+  it("derives data only from the session account and ignores client-supplied account context", async () => {
+    const { app, authRepository, ownerRepository } = createApp();
+    const first = await createOwner(app, authRepository, ownerRepository, "dash-one@example.test");
+    const second = await createOwner(app, authRepository, ownerRepository, "dash-two@example.test");
+    await app.inject({ method: "POST", url: "/owner/vehicles", headers: { authorization: first.authorization }, payload: { type: "FOUR_WHEELER", registrationNumber: "MH 12 DB 1111", providerName: "Private Provider" } });
+
+    const spoofed = await app.inject({
+      method: "GET",
+      url: `${dashboardUrl}?accountId=${first.accountId as string}`,
+      headers: { authorization: second.authorization, "x-account-id": first.accountId as string },
+    });
+
+    expect(spoofed.statusCode).toBe(200);
+    expect(spoofed.json().summary.totalVehicles).toBe(0);
+    expect(spoofed.json().vehicles).toEqual([]);
+    expect(spoofed.json().recentActivity).toEqual([]);
+    expect(JSON.stringify(spoofed.json())).not.toContain("MH 12 DB 1111");
+  });
+});

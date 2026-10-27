@@ -22,6 +22,7 @@ import Fastify, {
   type preHandlerHookHandler,
 } from "fastify";
 import type { AuthRepository, SessionRecord } from "./auth/repository.js";
+import { buildOwnerDashboard } from "./owner/dashboard.js";
 import type { OwnerRepository } from "./owner/repository.js";
 import type { DetailerRepository } from "./detailer/repository.js";
 import { registerDetailerRoutes } from "./detailer/routes.js";
@@ -498,6 +499,13 @@ export function buildApp({
     async (request) => ({
       vehicles: await ownerRepository.listVehicles(ownerAccountId(request)),
     }),
+  );
+
+  app.get(
+    "/owner/dashboard",
+    { preHandler: ownerOnly },
+    async (request) =>
+      buildOwnerDashboard(await ownerRepository.listVehicles(ownerAccountId(request))),
   );
 
   app.post<{ Body: unknown }>(

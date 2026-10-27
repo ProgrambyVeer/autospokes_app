@@ -73,13 +73,36 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-function configureSuccessfulOwnerApi(fetchMock: ReturnType<typeof vi.fn>) {
+const emptyDashboard = {
+  summary: {
+    totalVehicles: 0,
+    activeVehicles: 0,
+    inactiveVehicles: 0,
+    vehiclesWithoutProvider: 0,
+    providerCounts: { INDEPENDENT_WASHER: 0, SOCIETY_VENDOR: 0, MARKETPLACE_VENDOR: 0 },
+  },
+  vehicles: [],
+  recentActivity: [],
+  availability: {
+    bookings: { available: false },
+    billing: { available: false },
+    notifications: { available: false },
+  },
+};
+
+function configureSuccessfulOwnerApi(
+  fetchMock: ReturnType<typeof vi.fn>,
+  options: { vehicles?: unknown[]; dashboard?: unknown; dashboardStatus?: number } = {},
+) {
   fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (path === "/auth/login") return jsonResponse(session);
     if (path === "/owner/profile") return jsonResponse(profile);
+    if (path === "/owner/dashboard") {
+      return jsonResponse(options.dashboard ?? emptyDashboard, options.dashboardStatus ?? 200);
+    }
     if (path === "/owner/vehicles" && (init?.method ?? "GET") === "GET") {
-      return jsonResponse({ vehicles: [] });
+      return jsonResponse({ vehicles: options.vehicles ?? [] });
     }
     if (path === "/owner/vehicles" && init?.method === "POST") {
       return jsonResponse(vehicle("MH 12 AB 1234"), 201);
@@ -180,6 +203,99 @@ describe("Owner experience", () => {
     expect(body).not.toHaveProperty("status");
     expect(CreateVehicleSchema.safeParse(body).success).toBe(true);
     expect(within(document.body).getByText("No provider selected")).toBeInTheDocument();
+  });
+});
+
+async function signInAsOwner(fetchMock: ReturnType<typeof vi.fn>) {
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+  await screen.findByRole("textbox", { name: "Email address" });
+  fireEvent.change(screen.getByRole("textbox", { name: "Email address" }), {
+    target: { value: "owner@example.test" },
+  });
+  fireEvent.change(screen.getByLabelText("Password"), {
+    target: { value: "correct-horse-battery-staple" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  await screen.findByRole("heading", { name: /A little more care/ });
+}
+
+describe("Owner dashboard and navigation", () => {
+  const second = { ...vehicle("KA 01 CD 5678"), id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", providerType: "SOCIETY_VENDOR" };
+  const twoVehicleDashboard = {
+    ...emptyDashboard,
+    summary: { ...emptyDashboard.summary, totalVehicles: 2, activeVehicles: 2, vehiclesWithoutProvider: 1 },
+    vehicles: [
+      { vehicleId: vehicle().id, serviceStatus: "NO_PROVIDER", providerType: null, providerVerified: false, upcomingService: null, currentWashStatus: null },
+      { vehicleId: second.id, serviceStatus: "PROVIDER_RECORDED", providerType: "SOCIETY_VENDOR", providerVerified: false, upcomingService: null, currentWashStatus: null },
+    ],
+    recentActivity: [
+      { id: "a1", kind: "VEHICLE_ADDED", vehicleId: second.id, registrationNumber: "KA 01 CD 5678", occurredAt: "2026-10-15T10:00:00.000Z" },
+    ],
+  };
+
+  it("shows the five Owner navigation items on mobile and desktop and only Owner pages", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    configureSuccessfulOwnerApi(fetchMock);
+    await signInAsOwner(fetchMock);
+    const navs = screen.getAllByRole("navigation", { name: "Owner navigation" });
+    expect(navs).toHaveLength(2);
+    for (const nav of navs) {
+      expect(within(nav).getAllByRole("button").map((button) => button.textContent)).toEqual([
+        "Home", "My vehicles", "Services", "Activity", "Profile",
+      ]);
+    }
+    expect(document.querySelector(".owner-app")).toHaveClass("owner-role-app");
+    expect(screen.queryByText(/Society|Detailer|Marketplace/i, { selector: "nav *" })).not.toBeInTheDocument();
+  });
+
+  it("shows first-use guidance and no invented data for a new Owner", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    configureSuccessfulOwnerApi(fetchMock);
+    await signInAsOwner(fetchMock);
+    expect(await screen.findByText("Set up your garage")).toBeInTheDocument();
+    expect(screen.getByText(/good (morning|afternoon|evening)/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Add vehicle/ })).toBeInTheDocument();
+    expect(screen.getByText("No invoice data is available yet")).toBeInTheDocument();
+  });
+
+  it("keeps per-vehicle status separate for multiple vehicles", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    configureSuccessfulOwnerApi(fetchMock, { vehicles: [vehicle(), second], dashboard: twoVehicleDashboard });
+    await signInAsOwner(fetchMock);
+    await screen.findByText("Per-vehicle status");
+    const list = document.querySelector<HTMLElement>(".status-list");
+    if (!list) throw new Error("Status list missing");
+    const rows = within(list).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("MH 12 AB 1234");
+    expect(rows[0]).toHaveTextContent("No provider");
+    expect(rows[1]).toHaveTextContent("KA 01 CD 5678");
+    expect(rows[1]).toHaveTextContent("Provider recorded");
+    expect(rows[1]).toHaveTextContent("Not verified by Autospokes");
+    expect(screen.getByText("1 without a provider")).toBeInTheDocument();
+  });
+
+  it("shows a retryable error when the dashboard fails without fabricating data", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    configureSuccessfulOwnerApi(fetchMock, { vehicles: [vehicle()], dashboard: { message: "boom" }, dashboardStatus: 500 });
+    await signInAsOwner(fetchMock);
+    expect(await screen.findByText(/could not load your service summary/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.getAllByText("MH 12 AB 1234").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Provider recorded")).not.toBeInTheDocument();
+  });
+
+  it("states honestly that bookings, billing and notifications are unavailable", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    configureSuccessfulOwnerApi(fetchMock, { vehicles: [vehicle(), second], dashboard: twoVehicleDashboard });
+    await signInAsOwner(fetchMock);
+    fireEvent.click(within(screen.getAllByRole("navigation", { name: "Owner navigation" })[0]!).getByRole("button", { name: "Services" }));
+    expect(await screen.findByText(/Booking is not available yet/)).toBeInTheDocument();
+    expect(screen.getByText(/No invoice data is available yet. No balances/)).toBeInTheDocument();
+    fireEvent.click(within(screen.getAllByRole("navigation", { name: "Owner navigation" })[0]!).getByRole("button", { name: "Activity" }));
+    expect(await screen.findByText("Vehicle added")).toBeInTheDocument();
+    expect(screen.getByText(/No notification channel is connected/)).toBeInTheDocument();
   });
 });
 

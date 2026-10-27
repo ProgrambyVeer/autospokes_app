@@ -176,6 +176,15 @@ no records/unavailable states rather than generated transactions. Photos are
 entered as image URLs; direct upload is not available. Society Vendor records
 are stored separately and do not read or modify Owner garages.
 
+Phase 6 extends this Owner app without a database migration. `GET /owner/dashboard`
+(Owner role only, account taken from the validated session) returns per-vehicle
+service status, counts and recent activity derived from the Owner's own vehicle
+records. The web app adds Home, My vehicles, Services, Activity and Profile
+pages with a mobile bottom navigation. Bookings, invoices, balances,
+payments and notifications have no Owner-side data source yet, so those areas
+show unavailable states; no SMS, WhatsApp, email or push message is sent.
+Providers shown are owner-entered and marked as not verified.
+
 Phase 3 adds the non-destructive migration
 `apps\api\prisma\migrations\20261014150000_phase3_owner_vehicles`. It adds
 vehicle types, the owner-scoped vehicle table, normalized registration
