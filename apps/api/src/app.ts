@@ -23,6 +23,8 @@ import Fastify, {
 } from "fastify";
 import type { AuthRepository, SessionRecord } from "./auth/repository.js";
 import type { OwnerRepository } from "./owner/repository.js";
+import type { DetailerRepository } from "./detailer/repository.js";
+import { registerDetailerRoutes } from "./detailer/routes.js";
 import {
   ACCESS_TOKEN_TTL_SECONDS,
   CSRF_COOKIE,
@@ -59,6 +61,8 @@ declare module "fastify" {
 type BuildAppOptions = {
   authRepository: AuthRepository;
   ownerRepository: OwnerRepository;
+  detailerRepository?: DetailerRepository;
+  clock?: () => Date;
   jwtSecret: string;
   nodeEnv: string;
 };
@@ -184,7 +188,14 @@ async function issueSession(
   };
 }
 
-export function buildApp({ authRepository, ownerRepository, jwtSecret, nodeEnv }: BuildAppOptions) {
+export function buildApp({
+  authRepository,
+  ownerRepository,
+  detailerRepository,
+  clock = () => new Date(),
+  jwtSecret,
+  nodeEnv,
+}: BuildAppOptions) {
   if (jwtSecret.length < 32) {
     throw new Error("JWT_SECRET must contain at least 32 characters");
   }
@@ -611,6 +622,17 @@ export function buildApp({ authRepository, ownerRepository, jwtSecret, nodeEnv }
     },
     async () => ({ events: await authRepository.listAuditEvents() }),
   );
+
+  if (detailerRepository) {
+    registerDetailerRoutes(app, {
+      repository: detailerRepository,
+      preHandler: [app.authenticate, requireRole("INDEPENDENT_DETAILER")],
+      httpError,
+      validationError,
+      isUniqueConstraintError,
+      now: clock,
+    });
+  }
 
   return app;
 }

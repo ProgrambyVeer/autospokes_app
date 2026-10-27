@@ -6,17 +6,19 @@ import {
   getOwnerProfile,
   getVehicle,
   getVehicles,
-  registerOwner,
+  registerAccount,
   restoreSession,
   signIn,
   signOut,
   updateOwnerProfile,
   updateVehicle,
   type AuthSession,
+  type AccountRole,
   type OwnerProfile,
   type VehicleDashboard,
 } from "./api";
 import { Icon } from "./components/Icon";
+import { DetailerWorkspace } from "./DetailerApp";
 
 type OwnerPage = "Overview" | "My vehicles" | "Profile" | "Vehicle detail";
 
@@ -67,6 +69,9 @@ function App() {
   }
 
   if (session.user.role !== "OWNER") {
+    if (session.user.role === "INDEPENDENT_DETAILER") {
+      return <DetailerWorkspace session={session} onSignOut={() => setSession(null)} />;
+    }
     return (
       <main className="auth-page">
         <Brand />
@@ -96,6 +101,7 @@ function SignIn({
   onAuthenticated: (session: AuthSession) => void;
 }) {
   const canRegister = import.meta.env.DEV;
+  const [role, setRole] = useState<AccountRole>("OWNER");
   const [registering, setRegistering] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(initialError);
@@ -109,10 +115,10 @@ function SignIn({
     const password = String(form.get("password") ?? "");
     try {
       const session = registering
-        ? await registerOwner(email, password, String(form.get("displayName") ?? "").trim())
-        : await signIn(email, password);
-      if (session.user.role !== "OWNER") {
-        throw new Error("This account does not have an Owner profile.");
+        ? await registerAccount(email, password, String(form.get("displayName") ?? "").trim(), role)
+        : await signIn(email, password, role);
+      if (session.user.role !== role) {
+        throw new Error("This account does not have the selected role.");
       }
       onAuthenticated(session);
     } catch (requestError) {
@@ -131,10 +137,27 @@ function SignIn({
         <h1 id="sign-in-title">{registering ? "Make yourself at home." : "Welcome back."}</h1>
         <p className="auth-description">
           {registering
-            ? "Create an Owner account and start building your private garage."
-            : "Sign in to see your vehicles and keep their care in one place."}
+            ? role === "OWNER"
+              ? "Create an Owner account and start building your private garage."
+              : "Create a Detailer account to manage your clients and daily care."
+            : role === "OWNER"
+              ? "Sign in to see your vehicles and keep their care in one place."
+              : "Sign in to manage your clients, schedules and daily tasks."}
         </p>
         <form className="owner-form auth-form" onSubmit={submit}>
+          <label>
+            Workspace
+            <select
+              value={role}
+              onChange={(event) => {
+                setRole(event.target.value as AccountRole);
+                setError("");
+              }}
+            >
+              <option value="OWNER">Owner</option>
+              <option value="INDEPENDENT_DETAILER">Independent Detailer</option>
+            </select>
+          </label>
           {registering && (
             <label>
               Your name
@@ -159,7 +182,11 @@ function SignIn({
           </label>
           {error && <div className="form-error" role="alert">{error}</div>}
           <button className="primary-button auth-submit" type="submit" disabled={submitting}>
-            {submitting ? "Please wait…" : registering ? "Create Owner account" : "Sign in"}
+            {submitting
+              ? "Please wait…"
+              : registering
+                ? `Create ${role === "OWNER" ? "Owner" : "Detailer"} account`
+                : "Sign in"}
             {!submitting && <Icon name="arrow-up-right" size={16} />}
           </button>
         </form>
@@ -173,7 +200,7 @@ function SignIn({
                 setError("");
               }}
             >
-              {registering ? "Sign in" : "Create an Owner account"}
+              {registering ? "Sign in" : `Create a ${role === "OWNER" ? "Owner" : "Detailer"} account`}
             </button>
           </p>
         )}

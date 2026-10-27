@@ -442,3 +442,102 @@ button:disabled { cursor: wait; opacity: .65; }
   .vehicle-overview-card > .status-pill { margin-left: 78px; }
   .page-footer { flex-direction: column; gap: 6px; }
 }
+
+.detailer-nav-count {
+  display: grid; min-width: 20px; height: 20px; margin-left: auto; place-items: center;
+  border-radius: 6px; color: #64707b; background: #fff; font-size: 9px;
+}
+.detailer-panel { max-width: 1020px; }
+.detailer-panel > h1, .detailer-heading-row h1, .detailer-onboarding h1 {
+  margin: 0; color: #191b1e; font: 700 clamp(28px, 3vw, 36px)/1.15 "Aptos Display", "Segoe UI", sans-serif;
+  letter-spacing: -1.2px;
+}
+.detailer-muted { margin: 8px 0 0; color: #858d95; font-size: 11px; line-height: 1.65; }
+.detailer-heading-row, .detailer-subheading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.detailer-heading-row { margin-bottom: 22px; }
+.detailer-subheading { margin: 29px 0 13px; }
+.detailer-subheading h2 { margin: 0; color: #30363c; font: 700 16px "Aptos Display", "Segoe UI", sans-serif; }
+.detailer-subheading .section-kicker { margin-bottom: 6px; }
+.detailer-onboarding, .detailer-panel, .detailer-vehicle-card {
+  padding: 21px; border: 1px solid #e9ebed; border-radius: 10px; background: #fff;
+}
+.detailer-onboarding { margin-bottom: 18px; border-color: #dfe7f7; background: linear-gradient(130deg, #fff, #f7f9ff); }
+.detailer-onboarding p:not(.section-kicker) { max-width: 580px; margin: 10px 0 15px; color: #858d95; font-size: 11px; line-height: 1.7; }
+.detailer-form { max-width: 680px; margin-top: 21px; }
+.detailer-form textarea, .detailer-inline-form textarea {
+  width: 100%; padding: 10px 11px; border: 1px solid #dfe3e7; border-radius: 7px;
+  color: #24282d; background: #fff; font: inherit; font-size: 12px; resize: vertical;
+}
+.detailer-form textarea:focus, .detailer-inline-form textarea:focus { border-color: #8ca8ed; outline: 3px solid rgba(50,104,232,.12); }
+.detailer-optional { color: #9aa1a8; font-size: 10px; font-weight: 400; }
+.detailer-back { margin: 0 0 18px; padding: 0; border: 0; color: #67727c; background: transparent; font-size: 11px; cursor: pointer; }
+.detailer-back:hover { color: #3268e8; }
+.detailer-client-list, .detailer-vehicle-list, .detailer-task-list { display: grid; gap: 9px; }
+.detailer-client-card {
+  display: flex; width: 100%; min-height: 74px; align-items: center; gap: 12px; padding: 12px;
+  border: 1px solid #eaeced; border-radius: 9px; color: inherit; background: #fff; text-align: left; cursor: pointer;
+}
+.detailer-client-card:hover { border-color: #cbd6ee; background: #fbfcff; }
+.detailer-client-copy { display: grid; min-width: 0; flex: 1; gap: 5px; }
+.detailer-client-copy strong { color: #333a40; font-size: 12px; }
+.detailer-client-copy small, .detailer-client-count { color: #8a939b; font-size: 10px; }
+.detailer-client-count { white-space: nowrap; }
+.detailer-client-card > svg { color: #929aa2; }
+.detailer-inline-form { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 14px 0; padding: 16px; border: 1px solid #eaeced; border-radius: 9px; background: #fafbfc; }
+.detailer-inline-form .detailer-actions { grid-column: 1 / -1; }
+.detailer-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.detailer-vehicle-card { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; padding: 15px; }
+.detailer-vehicle-card h3 { margin: 7px 0 4px; color: #30363c; font: 700 14px "Aptos Display", "Segoe UI", sans-serif; }
+.detailer-vehicle-card p { margin: 0; color: #858d95; font-size: 10px; }
+.detailer-tag { display: inline-flex; width: fit-content; padding: 4px 7px; border-radius: 4px; color: #5e6f8d; background: #f0f4fc; font-size: 9px; font-weight: 600; text-transform: capitalize; }
+.detailer-status { display: inline-flex; width: fit-content; align-items: center; padding: 4px 7px; border-radius: 4px; color: #66717b; background: #f1f3f5; font-size: 9px; font-weight: 600; text-transform: capitalize; }
+.detailer-status-completed { color: #35714f; background: #edf8f1; }
+.detailer-status-missed { color: #9b6532; background: #fff5e9; }
+.detailer-status-unavailable { color: #8d5d5d; background: #fff0f0; }
+.detailer-status-scheduled, .detailer-status-active { color: #4467a9; background: #eef3ff; }
+.detailer-status-inactive { color: #858d95; background: #f1f3f5; }
+.detailer-schedule-form { grid-column: 1 / -1; gap: 14px; padding: 15px; border-top: 1px solid #eceef0; }
+.detailer-schedule-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0; padding: 13px; border: 1px solid #e9ebed; border-radius: 8px; }
+.detailer-schedule-row legend { padding: 0 5px; color: #333a40; font-size: 11px; font-weight: 700; }
+.detailer-check { display: flex !important; min-height: 28px; align-items: center; gap: 7px !important; color: #646d76 !important; }
+.owner-form .detailer-check input { width: 15px; min-height: 15px; margin: 0; accent-color: #3268e8; }
+.detailer-weekdays { display: flex; flex-wrap: wrap; grid-column: 1 / -1; gap: 9px; }
+.detailer-schedule-row .form-grid { grid-column: 1 / -1; }
+.detailer-task-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin: 20px 0 14px; }
+.detailer-task-toolbar > label { display: grid; gap: 6px; color: #626b74; font-size: 10px; font-weight: 600; }
+.detailer-task-toolbar input { min-height: 38px; padding: 7px 9px; border: 1px solid #dfe3e7; border-radius: 7px; background: #fff; font: inherit; font-size: 11px; }
+.detailer-task-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 13px; border: 1px solid #eaeced; border-radius: 9px; background: #fff; }
+.detailer-task-main { display: flex; align-items: flex-start; gap: 11px; }
+.detailer-task-indicator { width: 8px; height: 8px; flex: 0 0 8px; margin-top: 7px; border-radius: 50%; background: #8496b4; }
+.detailer-task-indicator.detailer-status-completed { background: #4ea17b; }
+.detailer-task-indicator.detailer-status-missed { background: #dc984e; }
+.detailer-task-indicator.detailer-status-unavailable { background: #cc7777; }
+.detailer-task-main h2 { margin: 5px 0 3px; color: #30363c; font: 700 13px "Aptos Display", "Segoe UI", sans-serif; }
+.detailer-task-main p { margin: 0; color: #858d95; font-size: 10px; }
+.detailer-task-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.detailer-task-controls .primary-button, .detailer-task-controls .secondary-button { min-height: 32px; font-size: 9px; }
+.detailer-task-note { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.detailer-task-note label { color: #777f87; font-size: 9px; }
+.detailer-task-note input { width: min(180px, 42vw); min-height: 32px; padding: 6px 8px; border: 1px solid #e1e4e8; border-radius: 6px; color: #424a51; background: #fff; font: inherit; font-size: 10px; }
+.detailer-task-note input:focus { border-color: #8ca8ed; outline: 3px solid rgba(50,104,232,.12); }
+.detailer-task-note button:disabled { cursor: not-allowed; opacity: .5; }
+.detailer-exception-label { display: inline-block; margin-top: 5px; color: #9b6532; font-size: 9px; text-transform: capitalize; }
+.detailer-exception-active { border-color: #e5c4c4; color: #9b3e3e; background: #fff8f8; }
+.detailer-field-error { color: #a74444; font-size: 10px; }
+
+@media (max-width: 760px) {
+  .detailer-panel, .detailer-onboarding { padding: 17px; }
+  .detailer-heading-row { align-items: flex-start; flex-direction: column; }
+  .detailer-task-card { align-items: flex-start; flex-direction: column; }
+  .detailer-task-controls { justify-content: flex-start; }
+}
+@media (max-width: 520px) {
+  .detailer-inline-form { grid-template-columns: 1fr; padding: 13px; }
+  .detailer-inline-form .detailer-actions { grid-column: auto; }
+  .detailer-vehicle-card { grid-template-columns: 1fr; }
+  .detailer-vehicle-card > .detailer-status { position: absolute; top: 13px; right: 13px; }
+  .detailer-schedule-row { grid-template-columns: 1fr; }
+  .detailer-weekdays, .detailer-schedule-row .form-grid { grid-column: auto; }
+  .detailer-task-toolbar { align-items: flex-start; flex-direction: column; }
+  .detailer-client-count { display: none; }
+}

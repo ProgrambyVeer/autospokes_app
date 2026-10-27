@@ -1,4 +1,17 @@
-import type { OwnerVehicle } from "@autospokes/shared";
+import type {
+  CreateDetailerClientInput,
+  CreateDetailerVehicleInput,
+  DailyTask,
+  DetailerClient,
+  DetailerProfile,
+  DetailerVehicle,
+  OwnerVehicle,
+  TaskExceptionRequest,
+  UpdateDetailerClientInput,
+  UpdateDetailerVehicleInput,
+  WashSchedule,
+  WashScheduleInput,
+} from "@autospokes/shared";
 
 export type AuthSession = {
   accessToken: string;
@@ -91,21 +104,24 @@ export async function restoreSession(): Promise<AuthSession | null> {
   return responseBody<AuthSession>(response);
 }
 
-export function signIn(email: string, password: string): Promise<AuthSession> {
+export type AccountRole = "OWNER" | "INDEPENDENT_DETAILER";
+
+export function signIn(email: string, password: string, role: AccountRole): Promise<AuthSession> {
   return request("/auth/login", undefined, {
     method: "POST",
-    body: JSON.stringify({ email, password, role: "OWNER" }),
+    body: JSON.stringify({ email, password, role }),
   });
 }
 
-export function registerOwner(
+export function registerAccount(
   email: string,
   password: string,
   displayName: string,
+  role: AccountRole,
 ): Promise<AuthSession> {
   return request("/auth/register", undefined, {
     method: "POST",
-    body: JSON.stringify({ email, password, displayName, role: "OWNER" }),
+    body: JSON.stringify({ email, password, displayName, role }),
   });
 }
 
@@ -160,6 +176,123 @@ export function updateVehicle(
 ): Promise<OwnerVehicle> {
   return request(`/owner/vehicles/${id}`, session, {
     method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export function getDetailerProfile(session: AuthSession): Promise<DetailerProfile> {
+  return request("/detailer/profile", session);
+}
+
+export function updateDetailerProfile(
+  session: AuthSession,
+  input: Partial<DetailerProfile>,
+): Promise<DetailerProfile> {
+  return request("/detailer/profile", session, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export function getDetailerClients(session: AuthSession): Promise<DetailerClient[]> {
+  return request<{ clients: DetailerClient[] }>("/detailer/clients", session).then(
+    ({ clients }) => clients,
+  );
+}
+
+export function getDetailerClient(
+  session: AuthSession,
+  id: string,
+): Promise<{ client: DetailerClient; vehicles: DetailerVehicle[] }> {
+  return request(`/detailer/clients/${id}`, session);
+}
+
+export function createDetailerClient(
+  session: AuthSession,
+  input: CreateDetailerClientInput,
+): Promise<DetailerClient> {
+  return request("/detailer/clients", session, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateDetailerClient(
+  session: AuthSession,
+  id: string,
+  input: UpdateDetailerClientInput,
+): Promise<DetailerClient> {
+  return request(`/detailer/clients/${id}`, session, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export function createDetailerVehicle(
+  session: AuthSession,
+  clientId: string,
+  input: CreateDetailerVehicleInput,
+): Promise<DetailerVehicle> {
+  return request(`/detailer/clients/${clientId}/vehicles`, session, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function getDetailerVehicle(
+  session: AuthSession,
+  id: string,
+): Promise<{ vehicle: DetailerVehicle; schedules: WashSchedule[] }> {
+  return request(`/detailer/vehicles/${id}`, session);
+}
+
+export function updateDetailerVehicle(
+  session: AuthSession,
+  id: string,
+  input: UpdateDetailerVehicleInput,
+): Promise<DetailerVehicle> {
+  return request(`/detailer/vehicles/${id}`, session, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export function saveDetailerSchedules(
+  session: AuthSession,
+  vehicleId: string,
+  schedules: WashScheduleInput[],
+): Promise<{ schedules: WashSchedule[] }> {
+  return request(`/detailer/vehicles/${vehicleId}/schedules`, session, {
+    method: "PUT",
+    body: JSON.stringify({ schedules }),
+  });
+}
+
+export function getDetailerTasks(
+  session: AuthSession,
+  date?: string,
+): Promise<{ date: string; today: string; tasks: DailyTask[] }> {
+  const query = date ? `?date=${encodeURIComponent(date)}` : "";
+  return request(`/detailer/tasks${query}`, session);
+}
+
+export function updateDetailerTask(
+  session: AuthSession,
+  id: string,
+  input: { status: DailyTask["status"]; note?: string | null },
+): Promise<DailyTask> {
+  return request(`/detailer/tasks/${id}`, session, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateDetailerException(
+  session: AuthSession,
+  input: TaskExceptionRequest,
+): Promise<{ date: string; updated: number; tasks: DailyTask[] }> {
+  return request("/detailer/tasks/exceptions", session, {
+    method: "PUT",
     body: JSON.stringify(input),
   });
 }

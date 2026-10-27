@@ -37,6 +37,37 @@ enum VehicleProviderType {
   MARKETPLACE_VENDOR
 }
 
+enum WashActivity {
+  EXTERIOR_WASH
+  INTERIOR_CLEANING
+  TYRE_POLISH
+}
+
+enum TaskActivity {
+  DUSTING
+  EXTERIOR_WASH
+  INTERIOR_CLEANING
+  TYRE_POLISH
+}
+
+enum ScheduleFrequency {
+  DAILY
+  SELECTED_DAYS
+}
+
+enum DailyTaskStatus {
+  SCHEDULED
+  COMPLETED
+  MISSED
+  UNAVAILABLE
+}
+
+enum DailyTaskException {
+  VEHICLE_UNAVAILABLE
+  WASH_MISSED
+  DETAILER_ON_LEAVE
+}
+
 model User {
   id           String        @id @default(uuid()) @db.Uuid
   email        String        @unique @db.VarChar(254)
@@ -60,6 +91,10 @@ model Account {
   sessions    Session[]
   auditEvents AuditEvent[]
   vehicles    Vehicle[]
+  detailerClients  DetailerClient[]
+  detailerVehicles DetailerVehicle[]
+  washSchedules    WashSchedule[]
+  dailyTasks       DailyTask[]
 }
 
 model Vehicle {
@@ -88,6 +123,91 @@ model Vehicle {
 
   @@unique([id, accountId])
   @@index([accountId, status, createdAt])
+}
+
+model DetailerClient {
+  id          String            @id @default(uuid()) @db.Uuid
+  accountId   String            @db.Uuid
+  name        String            @db.VarChar(100)
+  phoneNumber String            @db.VarChar(16)
+  notes       String?           @db.VarChar(500)
+  status      VehicleStatus     @default(ACTIVE)
+  createdAt   DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime          @updatedAt @db.Timestamptz(6)
+  account     Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  vehicles    DetailerVehicle[]
+
+  @@unique([accountId, phoneNumber])
+  @@unique([id, accountId])
+  @@index([accountId, status, name])
+}
+
+model DetailerVehicle {
+  id                           String          @id @default(uuid()) @db.Uuid
+  accountId                    String          @db.Uuid
+  clientId                     String          @db.Uuid
+  type                         VehicleType
+  registrationNumber           String          @db.VarChar(32)
+  registrationNumberNormalized String          @db.VarChar(32)
+  make                         String?         @db.VarChar(80)
+  model                        String?         @db.VarChar(80)
+  locationName                 String?         @db.VarChar(100)
+  status                       VehicleStatus   @default(ACTIVE)
+  createdAt                    DateTime        @default(now()) @db.Timestamptz(6)
+  updatedAt                    DateTime        @updatedAt @db.Timestamptz(6)
+  account                      Account         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  client                       DetailerClient  @relation(fields: [clientId, accountId], references: [id, accountId], onDelete: NoAction)
+  schedules                    WashSchedule[]
+  tasks                        DailyTask[]
+
+  @@unique([accountId, registrationNumberNormalized])
+  @@unique([id, accountId])
+  @@index([clientId, accountId])
+  @@index([accountId, status])
+}
+
+model WashSchedule {
+  id              String            @id @default(uuid()) @db.Uuid
+  accountId       String            @db.Uuid
+  vehicleId       String            @db.Uuid
+  activity        WashActivity
+  taskActivityKey TaskActivity
+  frequency       ScheduleFrequency
+  weekdays        Int[]             @default([])
+  effectiveFrom   DateTime          @db.Date
+  effectiveTo     DateTime?         @db.Date
+  isActive        Boolean           @default(true)
+  createdAt       DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime          @updatedAt @db.Timestamptz(6)
+  account         Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  vehicle         DetailerVehicle   @relation(fields: [vehicleId, accountId], references: [id, accountId], onDelete: NoAction)
+  tasks           DailyTask[]
+
+  @@unique([vehicleId, activity])
+  @@unique([id, accountId])
+  @@unique([id, accountId, vehicleId, taskActivityKey])
+  @@index([accountId, isActive])
+}
+
+model DailyTask {
+  id          String             @id @default(uuid()) @db.Uuid
+  accountId   String             @db.Uuid
+  vehicleId   String             @db.Uuid
+  scheduleId  String?            @db.Uuid
+  activity    TaskActivity
+  taskDate    DateTime           @db.Date
+  status      DailyTaskStatus    @default(SCHEDULED)
+  exception   DailyTaskException?
+  completedAt DateTime?          @db.Timestamptz(6)
+  note        String?            @db.VarChar(500)
+  createdAt   DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime           @updatedAt @db.Timestamptz(6)
+  account     Account            @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  vehicle     DetailerVehicle    @relation(fields: [vehicleId, accountId], references: [id, accountId], onDelete: NoAction)
+  schedule    WashSchedule?      @relation(fields: [scheduleId, accountId, vehicleId, activity], references: [id, accountId, vehicleId, taskActivityKey], onDelete: NoAction)
+
+  @@unique([vehicleId, taskDate, activity])
+  @@index([accountId, taskDate])
 }
 
 model RoleProfile {

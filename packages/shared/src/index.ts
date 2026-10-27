@@ -60,7 +60,7 @@ export type VehicleProviderType = z.infer<typeof VehicleProviderTypeSchema>;
 
 const optionalLabel = (max: number) => z.string().trim().max(max).optional().nullable();
 const positiveDimension = z.number().positive().max(100_000).optional().nullable();
-const RegistrationNumberSchema = z.string().trim()
+export const RegistrationNumberSchema = z.string().trim()
   .min(3, "Registration number must be at least 3 characters")
   .max(32, "Registration number must be 32 characters or fewer")
   .regex(/^[A-Za-z0-9 -]+$/, "Registration number may only contain letters, numbers, spaces and hyphens")
@@ -163,3 +163,221 @@ export const OwnerVehicleSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 export type OwnerVehicle = z.infer<typeof OwnerVehicleSchema>;
+
+// ---------------------------------------------------------------------------
+// Independent Detailer
+// ---------------------------------------------------------------------------
+
+export const IST_TIME_ZONE = "Asia/Kolkata";
+const IST_OFFSET_MINUTES = 330;
+
+/** Calendar date (YYYY-MM-DD) in India Standard Time, independent of the host time zone. */
+export function istDateString(now: Date): string {
+  return new Date(now.getTime() + IST_OFFSET_MINUTES * 60_000).toISOString().slice(0, 10);
+}
+
+export function isRealDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
+/** ISO weekday for a YYYY-MM-DD date: Monday = 1 … Sunday = 7. */
+export function isoWeekday(date: string): number {
+  const day = new Date(`${date}T00:00:00.000Z`).getUTCDay();
+  return day === 0 ? 7 : day;
+}
+
+export function addDays(date: string, days: number): string {
+  const result = new Date(`${date}T00:00:00.000Z`);
+  result.setUTCDate(result.getUTCDate() + days);
+  return result.toISOString().slice(0, 10);
+}
+
+/** Normalizes an Indian mobile number to E.164 (+91XXXXXXXXXX), or returns null. */
+export function normalizeIndianPhone(input: string): string | null {
+  const compact = input.trim().replace(/[\s\-().]/g, "");
+  const match = /^(?:\+91|91|0)?([6-9]\d{9})$/.exec(compact);
+  return match ? `+91${match[1]}` : null;
+}
+
+export const IndianPhoneSchema = z.string().trim().refine(
+  (value) => normalizeIndianPhone(value) !== null,
+  "Enter a valid 10-digit Indian mobile number",
+);
+
+const DateStringSchema = z.string().refine(isRealDate, "Enter a valid date as YYYY-MM-DD");
+
+export const DetailerProfileUpdateSchema = z.object({
+  displayName: z.string().trim().min(1).max(80).optional(),
+  phoneNumber: IndianPhoneSchema.optional(),
+  serviceArea: z.string().trim().min(1).max(160).optional(),
+  contactEmail: z.string().trim().email().max(254).optional().nullable(),
+}).strict().refine((fields) => Object.keys(fields).length > 0, "At least one field must be provided");
+export type DetailerProfileUpdateInput = z.infer<typeof DetailerProfileUpdateSchema>;
+
+export const CreateDetailerClientSchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(100),
+  phoneNumber: IndianPhoneSchema,
+  notes: optionalLabel(500),
+}).strict();
+export const UpdateDetailerClientSchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(100).optional(),
+  phoneNumber: IndianPhoneSchema.optional(),
+  notes: optionalLabel(500),
+  status: VehicleStatusSchema.optional(),
+}).strict().refine((fields) => Object.keys(fields).length > 0, "At least one field must be provided");
+export type CreateDetailerClientInput = z.infer<typeof CreateDetailerClientSchema>;
+export type UpdateDetailerClientInput = z.infer<typeof UpdateDetailerClientSchema>;
+
+export const CreateDetailerVehicleSchema = z.object({
+  type: VehicleTypeSchema,
+  registrationNumber: RegistrationNumberSchema,
+  make: optionalLabel(80),
+  model: optionalLabel(80),
+  locationName: optionalLabel(100),
+}).strict();
+export const UpdateDetailerVehicleSchema = z.object({
+  type: VehicleTypeSchema.optional(),
+  registrationNumber: RegistrationNumberSchema.optional(),
+  make: optionalLabel(80),
+  model: optionalLabel(80),
+  locationName: optionalLabel(100),
+  status: VehicleStatusSchema.optional(),
+}).strict().refine((fields) => Object.keys(fields).length > 0, "At least one field must be provided");
+export type CreateDetailerVehicleInput = z.infer<typeof CreateDetailerVehicleSchema>;
+export type UpdateDetailerVehicleInput = z.infer<typeof UpdateDetailerVehicleSchema>;
+
+export const WashActivitySchema = z.enum(["EXTERIOR_WASH", "INTERIOR_CLEANING", "TYRE_POLISH"]);
+export type WashActivity = z.infer<typeof WashActivitySchema>;
+export const TaskActivitySchema = z.enum([
+  "DUSTING",
+  "EXTERIOR_WASH",
+  "INTERIOR_CLEANING",
+  "TYRE_POLISH",
+]);
+export type TaskActivity = z.infer<typeof TaskActivitySchema>;
+export const ScheduleFrequencySchema = z.enum(["DAILY", "SELECTED_DAYS"]);
+export type ScheduleFrequency = z.infer<typeof ScheduleFrequencySchema>;
+
+export const WashScheduleInputSchema = z.object({
+  activity: WashActivitySchema,
+  frequency: ScheduleFrequencySchema,
+  weekdays: z.array(z.number().int().min(1).max(7)).max(7).default([]),
+  effectiveFrom: DateStringSchema,
+  effectiveTo: DateStringSchema.nullable().optional(),
+  isActive: z.boolean(),
+}).strict().superRefine((value, context) => {
+  if (new Set(value.weekdays).size !== value.weekdays.length) {
+    context.addIssue({ code: "custom", path: ["weekdays"], message: "Each weekday can be selected once" });
+  }
+  if (value.frequency === "SELECTED_DAYS" && value.weekdays.length === 0) {
+    context.addIssue({ code: "custom", path: ["weekdays"], message: "Select at least one weekday" });
+  }
+  if (value.effectiveTo && value.effectiveTo < value.effectiveFrom) {
+    context.addIssue({ code: "custom", path: ["effectiveTo"], message: "End date cannot be before the start date" });
+  }
+});
+export const SaveSchedulesSchema = z.object({
+  schedules: z.array(WashScheduleInputSchema).min(1).max(3),
+}).strict().superRefine((value, context) => {
+  const seen = new Set<string>();
+  for (const schedule of value.schedules) {
+    if (seen.has(schedule.activity)) {
+      context.addIssue({
+        code: "custom",
+        path: ["schedules"],
+        message: `${schedule.activity} is listed more than once`,
+      });
+    }
+    seen.add(schedule.activity);
+  }
+});
+export type WashScheduleInput = z.infer<typeof WashScheduleInputSchema>;
+
+export const DailyTaskStatusSchema = z.enum(["SCHEDULED", "COMPLETED", "MISSED", "UNAVAILABLE"]);
+export type DailyTaskStatus = z.infer<typeof DailyTaskStatusSchema>;
+export const DailyTaskExceptionSchema = z.enum([
+  "VEHICLE_UNAVAILABLE",
+  "WASH_MISSED",
+  "DETAILER_ON_LEAVE",
+]);
+export type DailyTaskException = z.infer<typeof DailyTaskExceptionSchema>;
+
+export const TaskQuerySchema = z.object({ date: DateStringSchema.optional() }).strict();
+export const UpdateTaskSchema = z.object({
+  status: DailyTaskStatusSchema,
+  note: optionalLabel(500),
+}).strict();
+export const TaskExceptionRequestSchema = z.object({
+  date: DateStringSchema,
+  exception: DailyTaskExceptionSchema,
+  vehicleId: z.string().uuid().optional(),
+  active: z.boolean(),
+}).strict().superRefine((value, context) => {
+  if (value.exception === "DETAILER_ON_LEAVE" && value.vehicleId) {
+    context.addIssue({ code: "custom", path: ["vehicleId"], message: "Leave applies to the whole day, not one vehicle" });
+  }
+  if (value.exception !== "DETAILER_ON_LEAVE" && !value.vehicleId) {
+    context.addIssue({ code: "custom", path: ["vehicleId"], message: "Choose the vehicle this applies to" });
+  }
+});
+export type TaskExceptionRequest = z.infer<typeof TaskExceptionRequestSchema>;
+
+export type DetailerProfile = {
+  displayName: string;
+  phoneNumber: string | null;
+  serviceArea: string | null;
+  contactEmail: string | null;
+  onboardingComplete: boolean;
+};
+export type DetailerClient = {
+  id: string;
+  name: string;
+  phoneNumber: string;
+  notes: string | null;
+  status: VehicleStatus;
+  vehicleCount: number;
+};
+export type DetailerVehicle = {
+  id: string;
+  clientId: string;
+  type: VehicleType;
+  registrationNumber: string;
+  make: string | null;
+  model: string | null;
+  locationName: string | null;
+  status: VehicleStatus;
+};
+export type WashSchedule = {
+  id: string;
+  vehicleId: string;
+  activity: WashActivity;
+  frequency: ScheduleFrequency;
+  weekdays: number[];
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  isActive: boolean;
+};
+export type DailyTask = {
+  id: string;
+  vehicleId: string;
+  scheduleId: string | null;
+  activity: TaskActivity;
+  taskDate: string;
+  status: DailyTaskStatus;
+  exception: DailyTaskException | null;
+  completedAt: string | null;
+  note: string | null;
+  registrationNumber: string;
+  make: string | null;
+  model: string | null;
+  locationName: string | null;
+  clientName: string;
+};

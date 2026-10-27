@@ -1,4 +1,8 @@
-import { CreateVehicleSchema } from "@autospokes/shared";
+import {
+  CreateDetailerClientSchema,
+  CreateDetailerVehicleSchema,
+  CreateVehicleSchema,
+} from "@autospokes/shared";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -16,6 +20,15 @@ const session = {
 };
 
 const profile = { displayName: "Taylor Owner", phoneNumber: null };
+const detailerSession = {
+  ...session,
+  user: {
+    ...session.user,
+    email: "detailer@example.test",
+    role: "INDEPENDENT_DETAILER",
+    displayName: "Morgan Detailer",
+  },
+};
 
 function vehicle(registrationNumber = "MH 12 AB 1234") {
   return {
@@ -84,6 +97,7 @@ describe("Owner experience", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Email address" }), {
       target: { value: "owner@example.test" },
     });
+
     fireEvent.change(screen.getByLabelText("Password"), {
       target: { value: "correct-horse-battery-staple" },
     });
@@ -155,5 +169,139 @@ describe("Owner experience", () => {
     expect(body).not.toHaveProperty("status");
     expect(CreateVehicleSchema.safeParse(body).success).toBe(true);
     expect(within(document.body).getByText("No provider selected")).toBeInTheDocument();
+  });
+});
+
+describe("Independent Detailer experience", () => {
+  function detailerApi(fetchMock: ReturnType<typeof vi.fn>, clients: unknown[] = []) {
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === "/auth/login") return jsonResponse(detailerSession);
+      if (path === "/detailer/profile") {
+        return jsonResponse({
+          displayName: "Morgan Detailer",
+          phoneNumber: "+919876543210",
+          serviceArea: "Indiranagar",
+          contactEmail: null,
+          onboardingComplete: true,
+        });
+      }
+      if (path === "/detailer/clients" && (init?.method ?? "GET") === "GET") {
+        return jsonResponse({ clients });
+      }
+      if (path.startsWith("/detailer/tasks")) {
+        return jsonResponse({ date: "2030-01-01", today: "2030-01-01", tasks: [] });
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${path}`);
+    });
+  }
+
+  async function signInAsDetailer() {
+    await screen.findByRole("textbox", { name: "Email address" });
+    fireEvent.change(screen.getByLabelText("Workspace"), {
+      target: { value: "INDEPENDENT_DETAILER" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Email address" }), {
+      target: { value: "detailer@example.test" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "correct-horse-battery-staple" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await screen.findByRole("heading", { name: "Today’s care plan" });
+  }
+
+  it("uses the selected role for sign-in and keeps Detailer navigation separate", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    detailerApi(fetchMock);
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await signInAsDetailer();
+
+    expect(screen.getByRole("navigation", { name: "Independent Detailer navigation" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Owner navigation" })).not.toBeInTheDocument();
+    const login = fetchMock.mock.calls.find(([url]) => url === "/auth/login");
+    expect(JSON.parse(String((login?.[1] as RequestInit).body))).toMatchObject({
+      role: "INDEPENDENT_DETAILER",
+    });
+  });
+
+  it("submits client and vehicle payloads compatible with shared schemas", async () => {
+    let clientCreated = false;
+    const client = {
+      id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      name: "Asha Rao",
+      phoneNumber: "+919876543210",
+      notes: null,
+      status: "ACTIVE",
+      vehicleCount: 0,
+    };
+    const fetchMock = vi.fn<typeof fetch>();
+    detailerApi(fetchMock);
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === "/auth/login") return jsonResponse(detailerSession);
+      if (path === "/detailer/profile") {
+        return jsonResponse({
+          displayName: "Morgan Detailer",
+          phoneNumber: "+919876543210",
+          serviceArea: "Indiranagar",
+          contactEmail: null,
+          onboardingComplete: true,
+        });
+      }
+      if (path === "/detailer/clients" && (init?.method ?? "GET") === "GET") {
+        return jsonResponse({ clients: clientCreated ? [client] : [] });
+      }
+      if (path === "/detailer/clients" && init?.method === "POST") {
+        clientCreated = true;
+        return jsonResponse(client, 201);
+      }
+      if (path === `/detailer/clients/${client.id}`) return jsonResponse({ client, vehicles: [] });
+      if (path === `/detailer/clients/${client.id}/vehicles` && init?.method === "POST") {
+        return jsonResponse({
+          id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+          clientId: client.id,
+          type: "TWO_WHEELER",
+          registrationNumber: "KA 03 MN 4567",
+          make: null,
+          model: null,
+          locationName: null,
+          status: "ACTIVE",
+        }, 201);
+      }
+      if (path.startsWith("/detailer/tasks")) {
+        return jsonResponse({ date: "2030-01-01", today: "2030-01-01", tasks: [] });
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await signInAsDetailer();
+    fireEvent.click(screen.getAllByRole("button", { name: "Clients" })[0]!);
+    fireEvent.click(await screen.findByRole("button", { name: "Add your first client" }));
+    fireEvent.change(screen.getByLabelText("Client name"), { target: { value: "Asha Rao" } });
+    fireEvent.change(screen.getByLabelText("Phone number"), { target: { value: "98765 43210" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save client" }));
+    await screen.findByRole("heading", { name: "Asha Rao" });
+
+    const clientRequest = fetchMock.mock.calls.find(
+      ([url, init]) => url === "/detailer/clients" && init?.method === "POST",
+    );
+    const clientPayload = JSON.parse(String((clientRequest?.[1] as RequestInit).body));
+    expect(CreateDetailerClientSchema.safeParse(clientPayload).success).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add vehicle" }));
+    fireEvent.change(screen.getByLabelText("Registration number"), {
+      target: { value: "KA 03 MN 4567" },
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Add vehicle" }).at(-1)!);
+    const vehicleRequest = await vi.waitFor(() =>
+      fetchMock.mock.calls.find(
+        ([url, init]) => url === `/detailer/clients/${client.id}/vehicles` && init?.method === "POST",
+      ),
+    );
+    const vehiclePayload = JSON.parse(String((vehicleRequest?.[1] as RequestInit).body));
+    expect(CreateDetailerVehicleSchema.safeParse(vehiclePayload).success).toBe(true);
   });
 });

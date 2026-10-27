@@ -104,7 +104,8 @@ Open the Vite URL printed in the terminal (normally
 `http://127.0.0.1:3001/health`.
 
 The API loads `apps\api\.env`; Vite reads `apps\web\.env`. In development, Vite
-proxies same-origin `/auth` and `/owner` requests to `http://127.0.0.1:3001`.
+proxies same-origin `/auth`, `/owner`, and `/detailer` requests to
+`http://127.0.0.1:3001`.
 For one PowerShell session, set `$env:PORT` before starting the API if its port
 needs to change; update the proxy target in `apps\web\vite.config.ts` to match.
 In a deployment, route those same paths through the hosting reverse proxy to
@@ -172,9 +173,8 @@ make/model, dimensions, HTTP(S) photo URLs, location, provider, and status;
 profile editing; and a vehicle-specific summary. No service-history,
 wash-status, invoice, or balance data source exists yet, so those sections show
 no records/unavailable states rather than generated transactions. Photos are
-entered as image URLs; direct upload is not available. Independent Detailer,
-Society Vendor, Marketplace Vendor, and Superadmin workflows remain out of
-scope.
+entered as image URLs; direct upload is not available. Society Vendor,
+Marketplace Vendor, and Superadmin workflows remain out of scope.
 
 Phase 3 adds the non-destructive migration
 `apps\api\prisma\migrations\20261014150000_phase3_owner_vehicles`. It adds
@@ -187,6 +187,40 @@ described above, apply pending migrations with:
 npm run db:verify
 npm run db:migrate
 ```
+
+## Independent Detailer
+
+The sign-in screen supports the existing development-only registration path
+for an Independent Detailer. The role is selected before sign-in or account
+creation; registration remains disabled in production. Detailers can complete
+a business profile (without SMS verification), add clients and their vehicles,
+configure independent exterior/interior/tyre schedules, and track daily tasks
+and exceptions. Client and vehicle records are isolated from the Owner vehicle
+model and are scoped to the validated Detailer account.
+
+Phase 4 adds the additive migration
+`apps\api\prisma\migrations\20261014180000_phase4_independent_detailer`.
+It creates Detailer client/vehicle, wash schedule, and daily task tables with
+account-scoped uniqueness, composite tenant foreign keys, and database checks.
+The Phase 4 migration is recorded as applied in the local `autospokes` database;
+this does not establish its status in any other environment. Before applying any
+pending migration, inspect its SQL and verify `apps\api\.env` targets the
+dedicated Autospokes database, never another project database. The additive
+follow-up migration
+`apps\api\prisma\migrations\20261027112000_phase4_task_schedule_integrity`
+adds a database constraint tying each scheduled task to the same account,
+vehicle, and activity as its wash schedule. It has not been applied as part of
+this change. Only after review and explicit approval, run these Windows
+PowerShell commands:
+
+```powershell
+npm run db:verify
+npm run db:migrate
+```
+
+`db:migrate` deploys all reviewed pending Prisma migrations; it does not reset
+the database. The Detailer UI requires this migration before its persisted API
+screens can be used.
 
 ## Workspace commands
 
