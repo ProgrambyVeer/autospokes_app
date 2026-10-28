@@ -141,7 +141,7 @@ export async function restoreSession(): Promise<AuthSession | null> {
   return responseBody<AuthSession>(response);
 }
 
-export type AccountRole = "OWNER" | "INDEPENDENT_DETAILER" | "SOCIETY_VENDOR";
+export type AccountRole = "OWNER" | "INDEPENDENT_DETAILER" | "SOCIETY_VENDOR" | "MARKETPLACE_VENDOR";
 
 export function signIn(email: string, password: string, role: AccountRole): Promise<AuthSession> {
   return request("/auth/login", undefined, {
@@ -625,4 +625,147 @@ export function updateDetailerException(
     method: "PUT",
     body: JSON.stringify(input),
   });
+}
+
+export type MarketplaceRecord = Record<string, unknown> & { id: string };
+export type MarketplaceBookingView = {
+  id: string;
+  status: string;
+  serviceName: string;
+  servicePricePaise: number;
+  serviceDurationMinutes: number;
+  vehicleRegistration: string;
+  vehicleId: string;
+  windowStart: string;
+  windowEnd: string;
+  serviceLocation: string;
+  accessNotes: string | null;
+  rejectionReason: string | null;
+  completionNotes: string | null;
+  disputeReason: string | null;
+  acceptedAt: string | null;
+  staffId?: string | null;
+};
+export type MarketplaceBookingDetailView = {
+  booking: MarketplaceBookingView;
+  events: { id: string; kind: string; toStatus: string | null; note: string | null; actorRole: string; createdAt: string }[];
+  payments: { id: string; amountPaise: number; method: string; reference: string | null; status: string; createdAt: string }[];
+  payment: { recordedPaise: number; verifiedPaise: number; note: string };
+  vendor?: { businessName: string | null; contactPhone: string | null };
+  staffName?: string | null;
+  assignedStaffId?: string | null;
+  assignedStaffName?: string | null;
+};
+export type MarketplaceDashboard = {
+  profile: { businessName: string; verificationStatus: string } | null;
+  bookingCounts: Record<string, number>;
+  totalBookings: number;
+  upcoming: MarketplaceBookingView[];
+  services: { active: number; inactive: number; archived: number };
+  staff: { active: number; available: number };
+  availability: { verification: string; settlement: string };
+};
+export type MarketplaceDiscovery = {
+  status: "OK" | "LOCATION_REQUIRED";
+  location: { mode: "COORDINATES" | "AREA"; radiusKm: number | null; city: string | null } | null;
+  results: {
+    serviceId: string;
+    name: string;
+    description: string | null;
+    category: string;
+    pricePaise: number;
+    durationMinutes: number;
+    inclusions: string[];
+    exclusions: string[];
+    terms: string | null;
+    distanceKm: number | null;
+    vendor: { businessName: string; city: string | null; verificationStatus: string };
+  }[];
+  noResultsWithinRadius: boolean;
+  unsupported: string[];
+};
+
+const post = (body?: unknown): RequestInit => ({
+  method: "POST",
+  ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+});
+
+export function getMarketplaceDashboard(session: AuthSession): Promise<MarketplaceDashboard> {
+  return request("/marketplace/dashboard", session);
+}
+export function getMarketplaceProfile(session: AuthSession): Promise<{ profile: Record<string, unknown> | null }> {
+  return request("/marketplace/profile", session);
+}
+export function saveMarketplaceProfile(session: AuthSession, input: Record<string, unknown>): Promise<{ profile: Record<string, unknown> }> {
+  return request("/marketplace/profile", session, { method: "PUT", body: JSON.stringify(input) });
+}
+export function getMarketplaceServices(session: AuthSession): Promise<MarketplaceRecord[]> {
+  return request<{ services: MarketplaceRecord[] }>("/marketplace/services", session).then((r) => r.services);
+}
+export function createMarketplaceService(session: AuthSession, input: Record<string, unknown>): Promise<MarketplaceRecord> {
+  return request("/marketplace/services", session, post(input));
+}
+export function updateMarketplaceService(session: AuthSession, id: string, input: Record<string, unknown>): Promise<MarketplaceRecord> {
+  return request(`/marketplace/services/${id}`, session, { method: "PATCH", body: JSON.stringify(input) });
+}
+export function setMarketplaceServiceStatus(session: AuthSession, id: string, status: string): Promise<MarketplaceRecord> {
+  return request(`/marketplace/services/${id}/status`, session, post({ status }));
+}
+export function getMarketplaceStaff(session: AuthSession): Promise<MarketplaceRecord[]> {
+  return request<{ staff: MarketplaceRecord[] }>("/marketplace/staff", session).then((r) => r.staff);
+}
+export function createMarketplaceStaff(session: AuthSession, input: Record<string, unknown>): Promise<MarketplaceRecord> {
+  return request("/marketplace/staff", session, post(input));
+}
+export function updateMarketplaceStaff(session: AuthSession, id: string, input: Record<string, unknown>): Promise<MarketplaceRecord> {
+  return request(`/marketplace/staff/${id}`, session, { method: "PATCH", body: JSON.stringify(input) });
+}
+export function getMarketplaceBookings(session: AuthSession): Promise<MarketplaceBookingView[]> {
+  return request<{ bookings: MarketplaceBookingView[] }>("/marketplace/bookings", session).then((r) => r.bookings);
+}
+export function getMarketplaceBooking(session: AuthSession, id: string): Promise<MarketplaceBookingDetailView> {
+  return request(`/marketplace/bookings/${id}`, session);
+}
+export function actOnMarketplaceBooking(
+  session: AuthSession,
+  id: string,
+  action: "accept" | "reject" | "start" | "complete",
+  body: Record<string, unknown> = {},
+): Promise<unknown> {
+  return request(`/marketplace/bookings/${id}/${action}`, session, post(body));
+}
+export function assignMarketplaceStaff(session: AuthSession, id: string, staffId: string | null): Promise<unknown> {
+  return request(`/marketplace/bookings/${id}/staff`, session, { method: "PUT", body: JSON.stringify({ staffId }) });
+}
+export function recordMarketplacePayment(session: AuthSession, id: string, input: Record<string, unknown>): Promise<unknown> {
+  return request(`/marketplace/bookings/${id}/payments`, session, post(input));
+}
+
+export function searchMarketplaceServices(session: AuthSession, params: Record<string, string>): Promise<MarketplaceDiscovery> {
+  const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== ""));
+  return request(`/owner/marketplace/services?${query.toString()}`, session);
+}
+export function createMarketplaceBooking(
+  session: AuthSession,
+  idempotencyKey: string,
+  input: Record<string, unknown>,
+): Promise<{ booking: MarketplaceBookingView; replayed: boolean }> {
+  return request("/owner/marketplace/bookings", session, {
+    ...post(input),
+    headers: { "idempotency-key": idempotencyKey },
+  });
+}
+export function getOwnerMarketplaceBookings(session: AuthSession): Promise<MarketplaceBookingView[]> {
+  return request<{ bookings: MarketplaceBookingView[] }>("/owner/marketplace/bookings", session).then((r) => r.bookings);
+}
+export function getOwnerMarketplaceBooking(session: AuthSession, id: string): Promise<MarketplaceBookingDetailView> {
+  return request(`/owner/marketplace/bookings/${id}`, session);
+}
+export function respondToMarketplaceCompletion(
+  session: AuthSession,
+  id: string,
+  decision: "accept-completion" | "dispute",
+  reason?: string,
+): Promise<unknown> {
+  return request(`/owner/marketplace/bookings/${id}/${decision}`, session, post(reason ? { reason } : {}));
 }

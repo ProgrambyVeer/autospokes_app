@@ -23,6 +23,8 @@ import {
 import { Icon, type IconName } from "./components/Icon";
 import { DetailerWorkspace } from "./DetailerApp";
 import { SocietyWorkspace } from "./SocietyApp";
+import { MarketplaceWorkspace } from "./MarketplaceApp";
+import { OwnerMarketplace } from "./OwnerMarketplace";
 
 type OwnerPage = "Home" | "My vehicles" | "Services" | "Activity" | "Profile" | "Vehicle detail";
 type DashboardState = "loading" | "ready" | "error";
@@ -81,6 +83,9 @@ function App() {
     }
     if (session.user.role === "SOCIETY_VENDOR") {
       return <SocietyWorkspace session={session} onSignOut={() => setSession(null)} />;
+    }
+    if (session.user.role === "MARKETPLACE_VENDOR") {
+      return <MarketplaceWorkspace session={session} onSignOut={() => setSession(null)} />;
     }
     return (
       <main className="auth-page">
@@ -151,12 +156,16 @@ function SignIn({
               ? "Create an Owner account and start building your private garage."
               : role === "INDEPENDENT_DETAILER"
                 ? "Create a Detailer account to manage your clients and daily care."
-                : "Create a Society Vendor account to coordinate residents, washers and service."
+                : role === "SOCIETY_VENDOR"
+                  ? "Create a Society Vendor account to coordinate residents, washers and service."
+                  : "Create a Marketplace Vendor account to list services and receive booking requests."
             : role === "OWNER"
               ? "Sign in to see your vehicles and keep their care in one place."
               : role === "INDEPENDENT_DETAILER"
                 ? "Sign in to manage your clients, schedules and daily tasks."
-                : "Sign in to manage your societies, service and billing."}
+                : role === "SOCIETY_VENDOR"
+                  ? "Sign in to manage your societies, service and billing."
+                  : "Sign in to manage your services, staff and booking requests."}
         </p>
         <form className="owner-form auth-form" onSubmit={submit}>
           <label>
@@ -171,6 +180,7 @@ function SignIn({
               <option value="OWNER">Owner</option>
               <option value="INDEPENDENT_DETAILER">Independent Detailer</option>
               <option value="SOCIETY_VENDOR">Society Vendor</option>
+              <option value="MARKETPLACE_VENDOR">Marketplace Vendor</option>
             </select>
           </label>
           {registering && (
@@ -200,7 +210,7 @@ function SignIn({
             {submitting
               ? "Please wait…"
               : registering
-                ? `Create ${role === "OWNER" ? "Owner" : role === "INDEPENDENT_DETAILER" ? "Detailer" : "Society Vendor"} account`
+                ? `Create ${role === "OWNER" ? "Owner" : role === "INDEPENDENT_DETAILER" ? "Detailer" : role === "SOCIETY_VENDOR" ? "Society Vendor" : "Marketplace Vendor"} account`
                 : "Sign in"}
             {!submitting && <Icon name="arrow-up-right" size={16} />}
           </button>
@@ -217,7 +227,7 @@ function SignIn({
             >
               {registering
                 ? "Sign in"
-                : `Create a ${role === "OWNER" ? "Owner" : role === "INDEPENDENT_DETAILER" ? "Detailer" : "Society Vendor"} account`}
+                : `Create a ${role === "OWNER" ? "Owner" : role === "INDEPENDENT_DETAILER" ? "Detailer" : role === "SOCIETY_VENDOR" ? "Society Vendor" : "Marketplace Vendor"} account`}
             </button>
           </p>
         )}
@@ -466,6 +476,7 @@ function OwnerWorkspace({
             )
           ) : page === "Services" ? (
             <ServicesPage
+              session={session}
               vehicles={vehicles}
               dashboard={dashboard}
               dashboardState={dashboardState}
@@ -731,6 +742,7 @@ function OwnerOverview({
 }
 
 function ServicesPage({
+  session,
   vehicles,
   dashboard,
   dashboardState,
@@ -738,6 +750,7 @@ function ServicesPage({
   onAddVehicle,
   onEdit,
 }: {
+  session: AuthSession;
   vehicles: OwnerVehicle[];
   dashboard: OwnerDashboard | null;
   dashboardState: DashboardState;
@@ -778,10 +791,11 @@ function ServicesPage({
           </ul>
         )}
       </section>
+      <OwnerMarketplace session={session} vehicles={vehicles} />
       <section className="unavailable-grid" aria-label="Not yet available">
         <article className="detail-card">
           <h2>Bookings</h2>
-          <p>{dashboard?.availability.bookings.available ? "Bookings are available." : "Booking is not available yet. Nothing is scheduled on your behalf."}</p>
+          <p>Marketplace requests are listed above with their real status. Other booking types, such as Society or Detailer services, are not scheduled through this page.</p>
         </article>
         <article className="detail-card">
           <h2>Bills &amp; payments</h2>

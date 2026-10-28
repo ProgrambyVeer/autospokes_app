@@ -6,6 +6,7 @@ import { verifyDedicatedDatabase } from "./database.js";
 import { PrismaOwnerRepository } from "./owner/prisma-repository.js";
 import { PrismaDetailerRepository } from "./detailer/prisma-repository.js";
 import { PrismaSocietyRepository } from "./society/prisma-repository.js";
+import { PrismaMarketplaceRepository } from "./marketplace/prisma-repository.js";
 
 const port = Number(process.env.PORT ?? 3001);
 const host = process.env.HOST ?? "127.0.0.1";
@@ -29,6 +30,7 @@ const app = buildApp({
   ownerRepository: new PrismaOwnerRepository(prisma),
   detailerRepository: new PrismaDetailerRepository(prisma),
   societyRepository: new PrismaSocietyRepository(prisma),
+  marketplaceRepository: new PrismaMarketplaceRepository(prisma),
   jwtSecret,
   nodeEnv,
 });

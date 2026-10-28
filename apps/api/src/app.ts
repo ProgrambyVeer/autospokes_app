@@ -28,6 +28,8 @@ import type { DetailerRepository } from "./detailer/repository.js";
 import { registerDetailerRoutes } from "./detailer/routes.js";
 import type { SocietyRepository } from "./society/repository.js";
 import { registerSocietyRoutes } from "./society/routes.js";
+import type { MarketplaceRepository } from "./marketplace/repository.js";
+import { registerMarketplaceRoutes } from "./marketplace/routes.js";
 import {
   ACCESS_TOKEN_TTL_SECONDS,
   CSRF_COOKIE,
@@ -66,6 +68,7 @@ type BuildAppOptions = {
   ownerRepository: OwnerRepository;
   detailerRepository?: DetailerRepository;
   societyRepository?: SocietyRepository;
+  marketplaceRepository?: MarketplaceRepository;
   clock?: () => Date;
   jwtSecret: string;
   nodeEnv: string;
@@ -197,6 +200,7 @@ export function buildApp({
   ownerRepository,
   detailerRepository,
   societyRepository,
+  marketplaceRepository,
   clock = () => new Date(),
   jwtSecret,
   nodeEnv,
@@ -653,6 +657,18 @@ export function buildApp({
       httpError,
       validationError,
       isUniqueConstraintError,
+      now: clock,
+    });
+  }
+
+  if (marketplaceRepository) {
+    registerMarketplaceRoutes(app, {
+      repository: marketplaceRepository,
+      ownerRepository,
+      vendorPreHandler: [app.authenticate, requireRole("MARKETPLACE_VENDOR")],
+      ownerPreHandler: ownerOnly,
+      httpError,
+      validationError,
       now: clock,
     });
   }

@@ -643,3 +643,16 @@ button:disabled { cursor: wait; opacity: .65; }
   .service-row { flex-wrap: wrap; }
   .activity-list time { margin-left: 0; }
 }
+
+/* Marketplace Vendor (Phase 7) - scoped */
+.marketplace-app .check-group, .owner-marketplace .check-group { display: flex; flex-wrap: wrap; gap: 10px; }
+.marketplace-app .check-option, .owner-marketplace .check-option { display: inline-flex; align-items: center; gap: 6px; font-size: 0.875rem; }
+.marketplace-app .row-actions, .owner-marketplace .row-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.marketplace-app .inline-form, .owner-marketplace .inline-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.marketplace-app .inline-select, .owner-marketplace .inline-select { min-width: 160px; }
+.marketplace-app .detail-list, .owner-marketplace .detail-list { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+.marketplace-app .detail-list dt, .owner-marketplace .detail-list dt { color: #6b7280; }
+.marketplace-app .detail-list dd, .owner-marketplace .detail-list dd { margin: 0; }
+.marketplace-app .booking-detail, .owner-marketplace .booking-detail { display: grid; gap: 14px; }
+.owner-marketplace { display: grid; gap: 18px; }
+.owner-marketplace .owner-form-note { color: #6b7280; font-size: 0.8125rem; }

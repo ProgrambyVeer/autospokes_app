@@ -256,6 +256,31 @@ been applied in any other environment. The schedule migration depends on the
 first Phase 5 migration. For any other environment, review both SQL files and
 verify the target database before running `npm run db:migrate`.
 
+## Marketplace Vendor
+
+Vendors register with the Marketplace Vendor workspace and manage a business
+profile, a service catalogue (prices in paise, archive is terminal) and a staff
+directory. Owners search under **Services** by city or shared location, request
+a booking for one of their own active vehicles (an `Idempotency-Key` makes
+retries safe), and confirm or dispute completion.
+
+- Vendor routes: `/marketplace/*`. Owner routes: `/owner/marketplace/*`. Both
+  derive the account from the session; bookings are account-scoped.
+- Booking lifecycle: requested, accepted or rejected, in progress, completed,
+  then confirmed or disputed. Service name, price and terms are snapshotted at
+  request time. Vehicle registration and location are masked from the vendor
+  until the booking is accepted.
+- Payments are recorded as **unverified** notes only. They never change booking
+  status and cannot exceed the agreed price.
+- Migration `20261110100000_phase7_marketplace_vendor` is additive and has been
+  reviewed but **not applied** by this change. Run `npm run db:verify`, confirm
+  the `autospokes` database, then `npm run db:migrate`.
+
+Not implemented (needs a policy or provider decision): settlement and booking
+closure, dispute resolution, cancellation, refund and no-show rules, payment
+verification, vendor verification, staff logins, ratings, live availability
+slots, and SMS/WhatsApp/in-app notifications. Vendors show as "Not verified".
+
 ## Workspace commands
 
 ```powershell

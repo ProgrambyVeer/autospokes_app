@@ -128,6 +128,61 @@ enum SocietyExtraWorkStatus {
   REJECTED
 }
 
+enum MarketplaceCategory {
+  GARAGE
+  DETAILING_CENTRE
+  MOBILE_DETAILER
+  OTHER
+}
+
+enum MarketplaceServiceCategory {
+  EXTERIOR_WASH
+  INTERIOR_CLEANING
+  DETAILING
+  POLISH_AND_COATING
+  PERIODIC_SERVICE
+  REPAIR
+  TYRE_AND_WHEEL
+  OTHER
+}
+
+enum MarketplaceVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum MarketplaceServiceStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum MarketplaceBookingStatus {
+  REQUESTED
+  ACCEPTED
+  REJECTED
+  IN_PROGRESS
+  PROVIDER_REPORTED_COMPLETION
+  CUSTOMER_ACCEPTED
+  DISPUTED
+  SETTLED
+  CLOSED
+}
+
+enum MarketplacePaymentStatus {
+  RECORDED_UNVERIFIED
+  VERIFIED
+}
+
+enum MarketplacePaymentMethod {
+  CASH
+  UPI
+  BANK_TRANSFER
+  CARD
+  OTHER
+}
+
 model User {
   id           String        @id @default(uuid()) @db.Uuid
   email        String        @unique @db.VarChar(254)
@@ -168,6 +223,11 @@ model Account {
   societyReminders SocietyPaymentReminder[]
   societyDeductions SocietyWasherDeduction[]
   societyExtraWork SocietyExtraWork[]
+  marketplaceProfile MarketplaceProfile?
+  marketplaceServices MarketplaceService[]
+  marketplaceStaff MarketplaceStaff[]
+  marketplaceBookingsAsOwner MarketplaceBooking[] @relation("MarketplaceBookingOwner")
+  marketplaceBookingsAsVendor MarketplaceBooking[] @relation("MarketplaceBookingVendor")
 }
 
 model Vehicle {
@@ -193,6 +253,7 @@ model Vehicle {
   createdAt                   DateTime            @default(now()) @db.Timestamptz(6)
   updatedAt                   DateTime            @updatedAt @db.Timestamptz(6)
   account                     Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  marketplaceBookings         MarketplaceBooking[]
 
   @@unique([id, accountId])
   @@index([accountId, status, createdAt])
@@ -631,4 +692,160 @@ model AuditEvent {
   @@index([accountId, createdAt])
   @@index([actorId, createdAt])
   @@index([action, createdAt])
+}
+
+model MarketplaceProfile {
+  id                 String                        @id @default(uuid()) @db.Uuid
+  accountId          String                        @unique @db.Uuid
+  businessName       String                        @db.VarChar(120)
+  description        String?                       @db.VarChar(1000)
+  category           MarketplaceCategory
+  contactPhone       String                        @db.VarChar(32)
+  contactEmail       String?                       @db.VarChar(254)
+  addressLine        String?                       @db.VarChar(240)
+  city               String?                       @db.VarChar(100)
+  postalCode         String?                       @db.VarChar(24)
+  latitude           Float?
+  longitude          Float?
+  serviceRadiusKm    Int?
+  serviceAreas       String[]                      @default([])
+  supportedVehicleTypes VehicleType[]
+  operatingHours     Json                          @default("{}")
+  logoUrl            String?                       @db.VarChar(2048)
+  galleryUrls        String[]                      @default([])
+  verificationStatus MarketplaceVerificationStatus @default(PENDING)
+  createdAt          DateTime                      @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime                      @updatedAt @db.Timestamptz(6)
+  account            Account                       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([city])
+}
+
+model MarketplaceService {
+  id              String                     @id @default(uuid()) @db.Uuid
+  accountId       String                     @db.Uuid
+  name            String                     @db.VarChar(120)
+  description     String?                    @db.VarChar(1000)
+  category        MarketplaceServiceCategory
+  vehicleTypes    VehicleType[]
+  pricePaise      Int
+  durationMinutes Int
+  status          MarketplaceServiceStatus   @default(ACTIVE)
+  inclusions      String[]                   @default([])
+  exclusions      String[]                   @default([])
+  terms           String?                    @db.VarChar(2000)
+  serviceAreas    String[]                   @default([])
+  version         Int                        @default(1)
+  createdAt       DateTime                   @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime                   @updatedAt @db.Timestamptz(6)
+  archivedAt      DateTime?                  @db.Timestamptz(6)
+  account         Account                    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  bookings        MarketplaceBooking[]
+
+  @@unique([id, accountId])
+  @@index([accountId, status, createdAt])
+  @@index([status, category])
+}
+
+model MarketplaceStaff {
+  id          String               @id @default(uuid()) @db.Uuid
+  accountId   String               @db.Uuid
+  name        String               @db.VarChar(100)
+  phoneNumber String?              @db.VarChar(32)
+  skills      String[]             @default([])
+  available   Boolean              @default(true)
+  active      Boolean              @default(true)
+  createdAt   DateTime             @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime             @updatedAt @db.Timestamptz(6)
+  account     Account              @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  bookings    MarketplaceBooking[]
+
+  @@unique([id, accountId])
+  @@index([accountId, active])
+}
+
+model MarketplaceBooking {
+  id                       String                   @id @default(uuid()) @db.Uuid
+  ownerAccountId           String                   @db.Uuid
+  vendorAccountId          String                   @db.Uuid
+  vehicleId                String                   @db.Uuid
+  serviceId                String                   @db.Uuid
+  staffId                  String?                  @db.Uuid
+  idempotencyKey           String                   @db.VarChar(80)
+  status                   MarketplaceBookingStatus @default(REQUESTED)
+  vehicleRegistration      String                   @db.VarChar(32)
+  vehicleType              VehicleType
+  vehicleLabel             String?                  @db.VarChar(160)
+  serviceName              String                   @db.VarChar(120)
+  serviceDescription       String?                  @db.VarChar(1000)
+  serviceCategory          MarketplaceServiceCategory
+  serviceInclusions        String[]                 @default([])
+  serviceExclusions        String[]                 @default([])
+  serviceTerms             String?                  @db.VarChar(2000)
+  servicePricePaise        Int
+  serviceDurationMinutes   Int
+  serviceVersion           Int
+  windowStart              DateTime                 @db.Timestamptz(6)
+  windowEnd                DateTime                 @db.Timestamptz(6)
+  serviceLocation          String                   @db.VarChar(240)
+  accessNotes              String?                  @db.VarChar(500)
+  rejectionReason          String?                  @db.VarChar(500)
+  completionNotes          String?                  @db.VarChar(1000)
+  completionEvidenceUrls   String[]                 @default([])
+  disputeReason            String?                  @db.VarChar(1000)
+  createdAt                DateTime                 @default(now()) @db.Timestamptz(6)
+  updatedAt                DateTime                 @updatedAt @db.Timestamptz(6)
+  acceptedAt               DateTime?                @db.Timestamptz(6)
+  startedAt                DateTime?                @db.Timestamptz(6)
+  completionReportedAt     DateTime?                @db.Timestamptz(6)
+  customerRespondedAt      DateTime?                @db.Timestamptz(6)
+  settledAt                DateTime?                @db.Timestamptz(6)
+  closedAt                 DateTime?                @db.Timestamptz(6)
+  ownerAccount             Account                  @relation("MarketplaceBookingOwner", fields: [ownerAccountId], references: [id], onDelete: NoAction)
+  vendorAccount            Account                  @relation("MarketplaceBookingVendor", fields: [vendorAccountId], references: [id], onDelete: NoAction)
+  vehicle                  Vehicle                  @relation(fields: [vehicleId, ownerAccountId], references: [id, accountId], onDelete: NoAction)
+  service                  MarketplaceService       @relation(fields: [serviceId, vendorAccountId], references: [id, accountId], onDelete: NoAction)
+  staff                    MarketplaceStaff?        @relation(fields: [staffId, vendorAccountId], references: [id, accountId], onDelete: NoAction)
+  events                   MarketplaceBookingEvent[]
+  payments                 MarketplacePayment[]
+
+  @@unique([ownerAccountId, idempotencyKey])
+  @@unique([id, vendorAccountId])
+  @@unique([id, ownerAccountId])
+  @@index([vendorAccountId, status, windowStart])
+  @@index([ownerAccountId, status, createdAt])
+  @@index([staffId])
+}
+
+model MarketplaceBookingEvent {
+  id              String                    @id @default(uuid()) @db.Uuid
+  bookingId       String                    @db.Uuid
+  vendorAccountId String                    @db.Uuid
+  actorId         String                    @db.Uuid
+  actorRole       UserRole
+  kind            String                    @db.VarChar(40)
+  fromStatus      MarketplaceBookingStatus?
+  toStatus        MarketplaceBookingStatus?
+  note            String?                   @db.VarChar(1000)
+  details         Json?
+  createdAt       DateTime                  @default(now()) @db.Timestamptz(6)
+  booking         MarketplaceBooking        @relation(fields: [bookingId, vendorAccountId], references: [id, vendorAccountId], onDelete: NoAction)
+
+  @@index([bookingId, createdAt])
+}
+
+model MarketplacePayment {
+  id              String                   @id @default(uuid()) @db.Uuid
+  bookingId       String                   @db.Uuid
+  vendorAccountId String                   @db.Uuid
+  amountPaise     Int
+  method          MarketplacePaymentMethod
+  reference       String?                  @db.VarChar(120)
+  note            String?                  @db.VarChar(500)
+  status          MarketplacePaymentStatus @default(RECORDED_UNVERIFIED)
+  recordedBy      String                   @db.Uuid
+  createdAt       DateTime                 @default(now()) @db.Timestamptz(6)
+  booking         MarketplaceBooking       @relation(fields: [bookingId, vendorAccountId], references: [id, vendorAccountId], onDelete: NoAction)
+
+  @@index([bookingId, createdAt])
 }

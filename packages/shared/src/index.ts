@@ -547,3 +547,238 @@ export type SocietyInput = z.infer<typeof SocietyInputSchema>;
 export type SocietyResidentInput = z.infer<typeof SocietyResidentInputSchema>;
 export type SocietyVehicleInput = z.infer<typeof SocietyVehicleInputSchema>;
 export type SocietyWasherInput = z.infer<typeof SocietyWasherInputSchema>;
+
+// ---------------------------------------------------------------------------
+// Marketplace Vendor
+// ---------------------------------------------------------------------------
+
+export const MarketplaceCategorySchema = z.enum([
+  "GARAGE",
+  "DETAILING_CENTRE",
+  "MOBILE_DETAILER",
+  "OTHER",
+]);
+export const MarketplaceServiceCategorySchema = z.enum([
+  "EXTERIOR_WASH",
+  "INTERIOR_CLEANING",
+  "DETAILING",
+  "POLISH_AND_COATING",
+  "PERIODIC_SERVICE",
+  "REPAIR",
+  "TYRE_AND_WHEEL",
+  "OTHER",
+]);
+export const MarketplaceVerificationStatusSchema = z.enum(["PENDING", "VERIFIED", "REJECTED"]);
+export const MarketplaceServiceStatusSchema = z.enum(["ACTIVE", "INACTIVE", "ARCHIVED"]);
+export const MarketplaceBookingStatusSchema = z.enum([
+  "REQUESTED",
+  "ACCEPTED",
+  "REJECTED",
+  "IN_PROGRESS",
+  "PROVIDER_REPORTED_COMPLETION",
+  "CUSTOMER_ACCEPTED",
+  "DISPUTED",
+  "SETTLED",
+  "CLOSED",
+]);
+export const MarketplacePaymentMethodSchema = z.enum([
+  "CASH",
+  "UPI",
+  "BANK_TRANSFER",
+  "CARD",
+  "OTHER",
+]);
+export type MarketplaceCategory = z.infer<typeof MarketplaceCategorySchema>;
+export type MarketplaceServiceCategory = z.infer<typeof MarketplaceServiceCategorySchema>;
+export type MarketplaceVerificationStatus = z.infer<typeof MarketplaceVerificationStatusSchema>;
+export type MarketplaceServiceStatus = z.infer<typeof MarketplaceServiceStatusSchema>;
+export type MarketplaceBookingStatus = z.infer<typeof MarketplaceBookingStatusSchema>;
+export type MarketplacePaymentMethod = z.infer<typeof MarketplacePaymentMethodSchema>;
+
+const HttpUrlSchema = z.string().url().max(2048).refine((value) => {
+  const protocol = new URL(value).protocol;
+  return protocol === "http:" || protocol === "https:";
+}, "Enter an http(s) URL");
+const LabelListSchema = (maxItems: number, maxLength: number) =>
+  z.array(z.string().trim().min(1).max(maxLength)).max(maxItems);
+const VehicleTypeListSchema = z.array(VehicleTypeSchema).min(1, "Select at least one vehicle type").max(3)
+  .refine((value) => new Set(value).size === value.length, "Each vehicle type can be selected once");
+
+export const MARKETPLACE_WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+const TimeOfDaySchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use HH:MM in 24-hour time");
+export const MarketplaceDayHoursSchema = z.object({
+  open: TimeOfDaySchema,
+  close: TimeOfDaySchema,
+}).strict().refine((value) => value.open < value.close, "Closing time must be after opening time");
+export const MarketplaceOperatingHoursSchema = z.object(
+  Object.fromEntries(
+    MARKETPLACE_WEEKDAYS.map((day) => [day, MarketplaceDayHoursSchema.nullable().optional()]),
+  ) as Record<(typeof MARKETPLACE_WEEKDAYS)[number], z.ZodOptional<z.ZodNullable<typeof MarketplaceDayHoursSchema>>>,
+).strict();
+export type MarketplaceOperatingHours = z.infer<typeof MarketplaceOperatingHoursSchema>;
+
+// Verification status is never client-writable; only an authorized review process may set it.
+export const MarketplaceProfileInputSchema = z.object({
+  businessName: z.string().trim().min(2).max(120),
+  description: z.string().trim().max(1000).optional().nullable(),
+  category: MarketplaceCategorySchema,
+  contactPhone: IndianPhoneSchema,
+  contactEmail: z.string().trim().email().max(254).optional().nullable(),
+  addressLine: optionalLabel(240),
+  city: optionalLabel(100),
+  postalCode: optionalLabel(24),
+  latitude: z.number().min(-90).max(90).optional().nullable(),
+  longitude: z.number().min(-180).max(180).optional().nullable(),
+  serviceRadiusKm: z.number().int().min(1).max(200).optional().nullable(),
+  serviceAreas: LabelListSchema(20, 100).default([]),
+  supportedVehicleTypes: VehicleTypeListSchema,
+  operatingHours: MarketplaceOperatingHoursSchema.default({}),
+  logoUrl: HttpUrlSchema.optional().nullable(),
+  galleryUrls: z.array(HttpUrlSchema).max(10).default([]),
+}).strict().superRefine((value, context) => {
+  if ((value.latitude == null) !== (value.longitude == null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["latitude"],
+      message: "Provide both latitude and longitude, or neither",
+    });
+  }
+  if (value.serviceRadiusKm != null && value.latitude == null) {
+    context.addIssue({
+      code: "custom",
+      path: ["serviceRadiusKm"],
+      message: "A service radius needs a business location (latitude and longitude)",
+    });
+  }
+});
+export type MarketplaceProfileInput = z.infer<typeof MarketplaceProfileInputSchema>;
+
+const ServiceFieldsShape = {
+  name: z.string().trim().min(2).max(120),
+  description: z.string().trim().max(1000).optional().nullable(),
+  category: MarketplaceServiceCategorySchema,
+  vehicleTypes: VehicleTypeListSchema,
+  pricePaise: z.number().int().min(1, "Price must be greater than zero").max(100_000_000),
+  durationMinutes: z.number().int().min(5, "Duration must be at least 5 minutes").max(1440),
+  inclusions: LabelListSchema(20, 120),
+  exclusions: LabelListSchema(20, 120),
+  terms: z.string().trim().max(2000).optional().nullable(),
+  serviceAreas: LabelListSchema(20, 100),
+};
+export const MarketplaceServiceInputSchema = z.object({
+  ...ServiceFieldsShape,
+  inclusions: ServiceFieldsShape.inclusions.default([]),
+  exclusions: ServiceFieldsShape.exclusions.default([]),
+  serviceAreas: ServiceFieldsShape.serviceAreas.default([]),
+  status: z.enum(["ACTIVE", "INACTIVE"]).default("ACTIVE"),
+}).strict();
+export const MarketplaceServiceUpdateSchema = z.object({
+  name: ServiceFieldsShape.name.optional(),
+  description: ServiceFieldsShape.description,
+  category: ServiceFieldsShape.category.optional(),
+  vehicleTypes: ServiceFieldsShape.vehicleTypes.optional(),
+  pricePaise: ServiceFieldsShape.pricePaise.optional(),
+  durationMinutes: ServiceFieldsShape.durationMinutes.optional(),
+  inclusions: ServiceFieldsShape.inclusions.optional(),
+  exclusions: ServiceFieldsShape.exclusions.optional(),
+  terms: ServiceFieldsShape.terms,
+  serviceAreas: ServiceFieldsShape.serviceAreas.optional(),
+}).strict().refine((value) => Object.keys(value).length > 0, "At least one field must be provided");
+export const MarketplaceServiceStatusInputSchema = z.object({
+  status: MarketplaceServiceStatusSchema,
+}).strict();
+export type MarketplaceServiceInput = z.infer<typeof MarketplaceServiceInputSchema>;
+export type MarketplaceServiceUpdate = z.infer<typeof MarketplaceServiceUpdateSchema>;
+
+export const MarketplaceStaffInputSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  phoneNumber: IndianPhoneSchema.optional().nullable(),
+  skills: LabelListSchema(20, 60).default([]),
+  available: z.boolean().default(true),
+}).strict();
+export const MarketplaceStaffUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  phoneNumber: IndianPhoneSchema.optional().nullable(),
+  skills: LabelListSchema(20, 60).optional(),
+  available: z.boolean().optional(),
+  active: z.boolean().optional(),
+}).strict().refine((value) => Object.keys(value).length > 0, "At least one field must be provided");
+export type MarketplaceStaffInput = z.infer<typeof MarketplaceStaffInputSchema>;
+export type MarketplaceStaffUpdate = z.infer<typeof MarketplaceStaffUpdateSchema>;
+
+export const MARKETPLACE_DEFAULT_RADIUS_KM = 10;
+const OptionalNumberQuery = (schema: z.ZodNumber) => z.preprocess(
+  (value) => (value === "" || value === undefined ? undefined : Number(value)),
+  schema.optional(),
+);
+export const MarketplaceDiscoveryQuerySchema = z.object({
+  latitude: OptionalNumberQuery(z.number().min(-90).max(90)),
+  longitude: OptionalNumberQuery(z.number().min(-180).max(180)),
+  city: z.string().trim().min(1).max(100).optional(),
+  radiusKm: OptionalNumberQuery(z.number().min(1).max(200)),
+  category: MarketplaceServiceCategorySchema.optional(),
+  vehicleType: VehicleTypeSchema.optional(),
+  minPricePaise: OptionalNumberQuery(z.number().int().min(0).max(100_000_000)),
+  maxPricePaise: OptionalNumberQuery(z.number().int().min(0).max(100_000_000)),
+  sort: z.enum(["price_asc", "distance"]).optional(),
+}).strict().superRefine((value, context) => {
+  if ((value.latitude === undefined) !== (value.longitude === undefined)) {
+    context.addIssue({ code: "custom", path: ["latitude"], message: "Provide both latitude and longitude" });
+  }
+  if (
+    value.minPricePaise !== undefined &&
+    value.maxPricePaise !== undefined &&
+    value.minPricePaise > value.maxPricePaise
+  ) {
+    context.addIssue({ code: "custom", path: ["minPricePaise"], message: "Minimum price cannot exceed maximum price" });
+  }
+  if (value.sort === "distance" && value.latitude === undefined) {
+    context.addIssue({ code: "custom", path: ["sort"], message: "Sorting by distance needs a coordinate location" });
+  }
+});
+export type MarketplaceDiscoveryQuery = z.infer<typeof MarketplaceDiscoveryQuerySchema>;
+
+export const MarketplaceIdempotencyKeySchema = z.string().regex(
+  /^[A-Za-z0-9_-]{8,80}$/,
+  "Idempotency-Key must be 8-80 letters, numbers, hyphens or underscores",
+);
+export const MarketplaceBookingInputSchema = z.object({
+  vehicleId: z.string().uuid(),
+  serviceId: z.string().uuid(),
+  windowStart: z.string().datetime(),
+  windowEnd: z.string().datetime(),
+  serviceLocation: z.string().trim().min(1).max(240),
+  accessNotes: z.string().trim().max(500).optional().nullable(),
+}).strict().superRefine((value, context) => {
+  const start = Date.parse(value.windowStart);
+  const end = Date.parse(value.windowEnd);
+  if (end <= start) {
+    context.addIssue({ code: "custom", path: ["windowEnd"], message: "The window must end after it starts" });
+  } else if (end - start > 24 * 60 * 60 * 1000) {
+    context.addIssue({ code: "custom", path: ["windowEnd"], message: "The window cannot be longer than 24 hours" });
+  }
+});
+export type MarketplaceBookingInput = z.infer<typeof MarketplaceBookingInputSchema>;
+
+export const MarketplaceRejectInputSchema = z.object({
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+export const MarketplaceCompletionInputSchema = z.object({
+  notes: z.string().trim().min(1).max(1000),
+  evidenceUrls: z.array(HttpUrlSchema).max(10).default([]),
+}).strict();
+export const MarketplaceDisputeInputSchema = z.object({
+  reason: z.string().trim().min(1).max(1000),
+}).strict();
+export const MarketplaceAssignStaffInputSchema = z.object({
+  staffId: z.string().uuid().nullable(),
+  note: z.string().trim().max(500).optional().nullable(),
+}).strict();
+export const MarketplacePaymentRecordSchema = z.object({
+  amountPaise: z.number().int().positive().max(100_000_000),
+  method: MarketplacePaymentMethodSchema,
+  reference: optionalLabel(120),
+  note: optionalLabel(500),
+}).strict();
+export type MarketplaceCompletionInput = z.infer<typeof MarketplaceCompletionInputSchema>;
+export type MarketplacePaymentRecordInput = z.infer<typeof MarketplacePaymentRecordSchema>;

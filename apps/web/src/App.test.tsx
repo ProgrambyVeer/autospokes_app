@@ -92,11 +92,25 @@ const emptyDashboard = {
 
 function configureSuccessfulOwnerApi(
   fetchMock: ReturnType<typeof vi.fn>,
-  options: { vehicles?: unknown[]; dashboard?: unknown; dashboardStatus?: number } = {},
+  options: {
+    vehicles?: unknown[];
+    dashboard?: unknown;
+    dashboardStatus?: number;
+    marketplaceBookingsStatus?: number;
+    discovery?: unknown;
+  } = {},
 ) {
   fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (path === "/auth/login") return jsonResponse(session);
+    if (path === "/owner/marketplace/bookings") {
+      return options.marketplaceBookingsStatus && options.marketplaceBookingsStatus !== 200
+        ? jsonResponse({ message: "boom" }, options.marketplaceBookingsStatus)
+        : jsonResponse({ bookings: [] });
+    }
+    if (path.startsWith("/owner/marketplace/services")) {
+      return jsonResponse(options.discovery ?? { status: "LOCATION_REQUIRED", location: null, results: [], noResultsWithinRadius: false, unsupported: [] });
+    }
     if (path === "/owner/profile") return jsonResponse(profile);
     if (path === "/owner/dashboard") {
       return jsonResponse(options.dashboard ?? emptyDashboard, options.dashboardStatus ?? 200);
@@ -291,7 +305,7 @@ describe("Owner dashboard and navigation", () => {
     configureSuccessfulOwnerApi(fetchMock, { vehicles: [vehicle(), second], dashboard: twoVehicleDashboard });
     await signInAsOwner(fetchMock);
     fireEvent.click(within(screen.getAllByRole("navigation", { name: "Owner navigation" })[0]!).getByRole("button", { name: "Services" }));
-    expect(await screen.findByText(/Booking is not available yet/)).toBeInTheDocument();
+    expect(await screen.findByText("No marketplace bookings.")).toBeInTheDocument();
     expect(screen.getByText(/No invoice data is available yet. No balances/)).toBeInTheDocument();
     fireEvent.click(within(screen.getAllByRole("navigation", { name: "Owner navigation" })[0]!).getByRole("button", { name: "Activity" }));
     expect(await screen.findByText("Vehicle added")).toBeInTheDocument();
@@ -520,5 +534,114 @@ describe("Independent Detailer experience", () => {
     );
     const vehiclePayload = JSON.parse(String((vehicleRequest?.[1] as RequestInit).body));
     expect(CreateDetailerVehicleSchema.safeParse(vehiclePayload).success).toBe(true);
+  });
+});
+
+describe("Marketplace Vendor and Owner marketplace", () => {
+  const marketplaceSession = {
+    ...session,
+    user: { ...session.user, email: "market@example.test", role: "MARKETPLACE_VENDOR", displayName: "Morgan Market" },
+  };
+
+  it("routes a Marketplace Vendor to its own workspace and shows honest empty states", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock.mockImplementation(async (input) => {
+      const path = String(input);
+      if (path === "/auth/login") return jsonResponse(marketplaceSession);
+      if (path === "/marketplace/dashboard") {
+        return jsonResponse({
+          profile: null,
+          bookingCounts: {},
+          totalBookings: 0,
+          upcoming: [],
+          services: { active: 0, inactive: 0, archived: 0 },
+          staff: { active: 0, available: 0 },
+          availability: { verification: "x", settlement: "x" },
+        });
+      }
+      if (path === "/marketplace/profile") return jsonResponse({ profile: null });
+      if (path === "/marketplace/services") return jsonResponse({ services: [] });
+      if (path === "/marketplace/staff") return jsonResponse({ staff: [] });
+      if (path === "/marketplace/bookings") return jsonResponse({ bookings: [] });
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await screen.findByRole("textbox", { name: "Email address" });
+    fireEvent.change(screen.getByLabelText("Workspace"), { target: { value: "MARKETPLACE_VENDOR" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Email address" }), { target: { value: "market@example.test" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "correct-horse-battery-staple" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByRole("heading", { name: "Set up your business profile." })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Marketplace Vendor navigation" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Owner navigation" })).not.toBeInTheDocument();
+    expect(JSON.parse(String((fetchMock.mock.calls.find(([url]) => url === "/auth/login")?.[1] as RequestInit).body))).toMatchObject({ role: "MARKETPLACE_VENDOR" });
+  });
+
+  async function openServices(fetchMock: ReturnType<typeof vi.fn>) {
+    await signInAsOwner(fetchMock);
+    fireEvent.click(within(screen.getAllByRole("navigation", { name: "Owner navigation" })[0]!).getByRole("button", { name: "Services" }));
+    await screen.findByText("Find a service");
+  }
+
+  it("shows the empty bookings state and does not invent ratings or availability", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    configureSuccessfulOwnerApi(fetchMock, { vehicles: [vehicle()] });
+    await openServices(fetchMock);
+    expect(await screen.findByText("No marketplace bookings.")).toBeInTheDocument();
+    expect(screen.queryByText(/stars|rating:/i)).not.toBeInTheDocument();
+  });
+
+  it("requires a location and reports no results honestly", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    configureSuccessfulOwnerApi(fetchMock, {
+      vehicles: [vehicle()],
+      discovery: { status: "OK", location: { mode: "AREA", radiusKm: null, city: "Pune" }, results: [], noResultsWithinRadius: false, unsupported: [] },
+    });
+    await openServices(fetchMock);
+    expect(screen.getByRole("button", { name: "Search" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("City"), { target: { value: "Pune" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(await screen.findByText("No matching services found.")).toBeInTheDocument();
+  });
+
+  it("lists results with the no-ratings note and labels unverified vendors", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    configureSuccessfulOwnerApi(fetchMock, {
+      vehicles: [vehicle()],
+      discovery: {
+        status: "OK",
+        location: { mode: "AREA", radiusKm: null, city: "Pune" },
+        noResultsWithinRadius: false,
+        unsupported: [],
+        results: [{
+          serviceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+          name: "Full exterior wash",
+          description: null,
+          category: "EXTERIOR_WASH",
+          pricePaise: 50000,
+          durationMinutes: 45,
+          inclusions: [],
+          exclusions: [],
+          terms: null,
+          distanceKm: null,
+          vendor: { businessName: "Test Garage", city: "Pune", verificationStatus: "UNVERIFIED" },
+        }],
+      },
+    });
+    await openServices(fetchMock);
+    fireEvent.change(screen.getByLabelText("City"), { target: { value: "Pune" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(await screen.findByText("Full exterior wash")).toBeInTheDocument();
+    expect(screen.getByText(/Not verified/)).toBeInTheDocument();
+    expect(screen.getByText(/Ratings, live availability and sponsored placement are not available/)).toBeInTheDocument();
+  });
+
+  it("shows a retryable error when marketplace bookings fail to load", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    configureSuccessfulOwnerApi(fetchMock, { vehicles: [vehicle()], marketplaceBookingsStatus: 500 });
+    await openServices(fetchMock);
+    expect((await screen.findAllByRole("alert")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("No marketplace bookings.")).not.toBeInTheDocument();
   });
 });
