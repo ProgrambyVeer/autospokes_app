@@ -10,7 +10,8 @@
     "prisma:migrate:deploy": "node node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma",
     "db:verify": "tsx scripts/verify-database.ts",
     "bootstrap:superadmin": "tsx scripts/bootstrap-superadmin.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "start": "node dist/server.js"
   },
   "dependencies": {
     "@autospokes/shared": "0.1.0",
