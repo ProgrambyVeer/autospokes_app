@@ -388,32 +388,53 @@ regenerated Prisma client.
 ### Production readiness
 
 Added in Phase 9: `GET /ready` (returns 503 without details if the database is
-unreachable; `/health` stays a cheap liveness check), `TRUST_PROXY=true` for
-deployments behind a reverse proxy (so rate limits use the real client IP), log
-redaction of `Authorization` and cookie headers, and the missing dev proxy
-entries for `/marketplace` and `/admin`.
+unreachable; `/health` stays a cheap liveness check), log redaction of
+`Authorization` and cookie headers, and the missing dev proxy entries for
+`/marketplace` and `/admin`.
+
+Phase 10 adds an exact-origin CORS allowlist, production security headers, API
+startup configuration validation, and bounded per-process request rate limits.
+The development defaults allow only localhost Vite origins. Production requires
+`CORS_ORIGINS` to list the exact HTTPS web origins, separated by commas; wildcard
+origins and non-HTTPS production origins are rejected. CORS credentials are
+enabled only with those explicit origins. Non-browser clients without an
+`Origin` header remain supported.
 
 Manual steps before any real deployment:
 
 1. Set `NODE_ENV=production`, a strong random `JWT_SECRET` and a managed
-   `DATABASE_URL` for a dedicated database; never commit `.env`.
-2. Serve the web app and API from one HTTPS origin (cookies are `Secure` in
-   production), and set `TRUST_PROXY=true` only behind a proxy you control.
-3. Run `npx prisma migrate deploy` (via `npm run db:migrate`) as a release step
-   and take a backup first.
-4. Create the first Superadmin with the bootstrap script
-   (`ALLOW_PRODUCTION_SUPERADMIN_BOOTSTRAP=true` for that single run only).
-5. Point your platform health probes at `/ready`.
+   `DATABASE_URL` for a dedicated database; `JWT_SECRET` must have at least 32
+   characters. Never commit `.env` or put secret values in deployment logs.
+2. Set `CORS_ORIGINS` to exact HTTPS origins, for example
+   `https://app.example.com,https://admin.example.com`. Set
+   `TRUSTED_PROXY_ADDRESSES` to the actual reverse-proxy IPs/CIDRs only when the
+   API is network-restricted so clients cannot connect around that proxy. Leave
+   it empty otherwise; do not use a blanket forwarded-header trust setting.
+3. Tune `RATE_LIMIT_MAX`/`RATE_LIMIT_WINDOW_MS` and
+   `AUTH_RATE_LIMIT_MAX`/`AUTH_RATE_LIMIT_WINDOW_MS` for the deployment. The
+   current limiter is process-local, so use hosting-level coordinated controls
+   before running multiple API instances or relying on it as the only abuse
+   protection.
+4. Run `npx prisma migrate deploy` (via `npm run db:migrate`) as a reviewed
+   release step and take a backup first.
+5. Create the first Superadmin with the separate bootstrap script and managed
+   one-time secrets. The API server refuses to start if
+   `ALLOW_PRODUCTION_SUPERADMIN_BOOTSTRAP=true`; do not run the bootstrap
+   endpoint or script as part of normal server startup.
+6. Point your platform health probes at `/ready`.
 
 Remaining blockers (this is **not** production-ready):
 
 - No payment gateway or server-side callback, so every payment verification is
   manual, and no payouts exist.
 - No notifications (email, SMS, WhatsApp) for disputes, payments or suspensions.
-- No security headers or CORS policy are configured at the API; terminate TLS and
-  add headers at the proxy.
-- Rate limiting uses in-memory counters (per process), and there is no refresh-
-  token or password-reset flow beyond what Phase 2 provides.
+- Rate limiting uses bounded in-memory counters per process; there is no
+  coordinated multi-instance store. TLS termination, proxy network isolation,
+  and hosting-level abuse controls still require deployment verification.
+- Production CSP applies to API responses. The web hosting layer must also set
+  and validate appropriate document security headers for the actual deployed
+  frontend.
+- There is no password-reset flow beyond what Phase 2 provides.
 - No deployment pipeline, backup or monitoring setup, and CI runs only
   build, lint and unit tests (no database-backed tests).
 - Pending policy decisions (cancellation fees, refunds, who may resolve disputes

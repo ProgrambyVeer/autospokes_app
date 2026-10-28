@@ -15,6 +15,7 @@ function makeApp(nodeEnv = "development") {
     ownerRepository,
     jwtSecret: "test-only-secret-with-more-than-thirty-two-characters",
     nodeEnv,
+    authRateLimitMax: 100,
   });
   activeApps.push(app);
   return { app, repository, ownerRepository };
@@ -239,5 +240,76 @@ describe("authentication and authorization", () => {
 
     expect(logout.statusCode).toBe(204);
     expect(me.statusCode).toBe(401);
+  });
+
+  it("rejects sessions that are expired or revoked even if their access JWT is otherwise valid", async () => {
+    const { app, repository } = makeApp();
+    await register(app, "session-check@example.test");
+    const user = await repository.findCredentialByEmail("session-check@example.test");
+    expect(user).not.toBeNull();
+    const profile = user!.profiles[0]!;
+    await app.ready();
+
+    for (const kind of ["expired", "revoked"] as const) {
+      const session = await repository.createSession({
+        userId: user!.id,
+        roleProfileId: profile.id,
+        accountId: profile.accountId,
+        refreshTokenHash: `${kind}-refresh-hash`.padEnd(64, "0"),
+        expiresAt: kind === "expired" ? new Date(Date.now() - 60_000) : new Date(Date.now() + 60_000),
+      });
+      if (kind === "revoked") await repository.revokeSession(session.id, new Date());
+      const accessToken = app.jwt.sign({
+        sub: user!.id,
+        sid: session.id,
+        aid: profile.accountId,
+        pid: profile.id,
+        role: profile.role,
+      });
+      const response = await app.inject({
+        method: "GET",
+        url: "/auth/me",
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(response.statusCode, `${kind} session`).toBe(401);
+    }
+  });
+
+  it("does not allow role selection or request headers to elevate an ordinary account", async () => {
+    const { app } = makeApp();
+    const registration = await register(app, "no-role-escalation@example.test");
+    expect(registration.statusCode).toBe(201);
+    const elevatedLogin = await app.inject({
+      method: "POST",
+      url: "/auth/login",
+      payload: {
+        email: "no-role-escalation@example.test",
+        password: "correct-horse-battery-staple",
+        role: "SUPERADMIN",
+      },
+    });
+    const forgedRole = await app.inject({
+      method: "GET",
+      url: "/admin/audit-events",
+      headers: {
+        authorization: `Bearer ${registration.json().accessToken}`,
+        "x-user-role": "SUPERADMIN",
+        "x-account-id": "11111111-1111-4111-8111-111111111111",
+      },
+    });
+    const attemptedRegistration = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {
+        email: "forged-admin@example.test",
+        password: "correct-horse-battery-staple",
+        displayName: "Forged Admin",
+        role: "SUPERADMIN",
+      },
+    });
+
+    expect(elevatedLogin.statusCode).toBe(401);
+    expect(forgedRole.statusCode).toBe(403);
+    expect(attemptedRegistration.statusCode).toBe(400);
   });
 });

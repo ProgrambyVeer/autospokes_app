@@ -1,7 +1,8 @@
 import cookie from "@fastify/cookie";
+import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
 import { STATUS_CODES } from "node:http";
 import jwt from "@fastify/jwt";
-import rateLimit from "@fastify/rate-limit";
 import { verify } from "@node-rs/argon2";
 import {
   HealthResponseSchema,
@@ -78,15 +79,25 @@ type BuildAppOptions = {
   jwtSecret: string;
   nodeEnv: string;
   /** Set only when the API runs behind a trusted reverse proxy, so rate limits key on the real client IP. */
-  trustProxy?: boolean;
+  trustProxy?: string[] | false;
   /** Resolves when dependencies (the database) are reachable; backs GET /ready. */
   readinessCheck?: () => Promise<void>;
+  corsOrigins?: string[];
+  rateLimitMax?: number;
+  rateLimitWindowMs?: number;
+  authRateLimitMax?: number;
+  authRateLimitWindowMs?: number;
+  loggerStream?: { write(message: string): void };
 };
 
-const AUTH_RATE_LIMIT = {
-  max: 5,
-  timeWindow: 15 * 60 * 1000,
-};
+const DEFAULT_CORS_ORIGINS = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:5180",
+  "http://127.0.0.1:5180",
+];
+const CORS_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
+const CORS_HEADERS = ["authorization", "content-type", "x-csrf-token", "idempotency-key"];
 
 function refreshCookieOptions(secure: boolean) {
   return {
@@ -216,6 +227,12 @@ export function buildApp({
   nodeEnv,
   trustProxy = false,
   readinessCheck,
+  corsOrigins = nodeEnv === "production" ? [] : DEFAULT_CORS_ORIGINS,
+  rateLimitMax = 300,
+  rateLimitWindowMs = 60_000,
+  authRateLimitMax = 5,
+  authRateLimitWindowMs = 15 * 60 * 1000,
+  loggerStream,
 }: BuildAppOptions) {
   if (jwtSecret.length < 32) {
     throw new Error("JWT_SECRET must contain at least 32 characters");
@@ -226,14 +243,121 @@ export function buildApp({
     logger:
       nodeEnv === "test"
         ? false
-        : { redact: ["req.headers.authorization", "req.headers.cookie", "res.headers['set-cookie']"] },
+        : {
+            redact: [
+              "req.headers.authorization",
+              "req.headers.cookie",
+              "req.headers.x-csrf-token",
+              "res.headers['set-cookie']",
+            ],
+            ...(loggerStream ? { stream: loggerStream } : {}),
+          },
   });
   const dummyPasswordHash = DUMMY_PASSWORD_HASH;
   const secureCookies = nodeEnv === "production";
 
+  const allowedOrigins = new Set(corsOrigins);
+  const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+  const consumeRateLimit = (key: string, max: number, windowMs: number, now: number) => {
+    let bucket = rateLimitBuckets.get(key);
+    if (!bucket || bucket.resetAt <= now) {
+      bucket = { count: 0, resetAt: now + windowMs };
+    }
+    bucket.count += 1;
+    rateLimitBuckets.delete(key);
+    rateLimitBuckets.set(key, bucket);
+    return {
+      allowed: bucket.count <= max,
+      remaining: Math.max(0, max - bucket.count),
+      retryAfterSeconds: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)),
+      resetAt: bucket.resetAt,
+    };
+  };
+  app.addHook("onRequest", async (request, reply) => {
+    const now = Date.now();
+    const policies = [{ key: "global", max: rateLimitMax, windowMs: rateLimitWindowMs }];
+    const routeLimit = (request.routeOptions.config as { rateLimit?: unknown }).rateLimit;
+    if (typeof routeLimit === "object" && routeLimit !== null) {
+      const { max, timeWindow } = routeLimit as { max?: number; timeWindow?: number };
+      if (typeof max === "number" && typeof timeWindow === "number") {
+        policies.push({ key: `route:${max}:${timeWindow}`, max, windowMs: timeWindow });
+      }
+    }
+    for (const policy of policies) {
+      const limit = consumeRateLimit(`${request.ip}:${policy.key}`, policy.max, policy.windowMs, now);
+      reply.header("x-ratelimit-limit", policy.max);
+      reply.header("x-ratelimit-remaining", limit.remaining);
+      reply.header("x-ratelimit-reset", Math.ceil(limit.resetAt / 1000));
+      if (!limit.allowed) {
+        reply.header("retry-after", limit.retryAfterSeconds);
+        return reply.code(429).send({
+          statusCode: 429,
+          error: "Too Many Requests",
+          message: "Rate limit exceeded, retry later",
+        });
+      }
+    }
+    if (rateLimitBuckets.size > 10_000) {
+      for (const [key, bucket] of rateLimitBuckets) {
+        if (bucket.resetAt <= now) rateLimitBuckets.delete(key);
+      }
+      while (rateLimitBuckets.size > 10_000) {
+        const oldestKey = rateLimitBuckets.keys().next().value;
+        if (oldestKey === undefined) break;
+        rateLimitBuckets.delete(oldestKey);
+      }
+    }
+  });
+  app.addHook("onRequest", async (request) => {
+    const origin = request.headers.origin;
+    if (origin && !allowedOrigins.has(origin)) {
+      throw httpError(403, "Origin is not allowed");
+    }
+    if (request.method === "OPTIONS" && origin) {
+      const requestedMethod = request.headers["access-control-request-method"]?.toUpperCase();
+      if (requestedMethod && !CORS_METHODS.includes(requestedMethod)) {
+        throw httpError(403, "CORS method is not allowed");
+      }
+      const requestedHeaders = request.headers["access-control-request-headers"];
+      if (requestedHeaders) {
+        const headers = requestedHeaders.split(",").map((header) => header.trim().toLowerCase());
+        if (headers.some((header) => !CORS_HEADERS.includes(header))) {
+          throw httpError(403, "CORS headers are not allowed");
+        }
+      }
+    }
+  });
+  app.register(cors, {
+    origin: [...allowedOrigins],
+    credentials: true,
+    methods: CORS_METHODS,
+    allowedHeaders: CORS_HEADERS,
+    maxAge: 600,
+    strictPreflight: true,
+  });
+  app.register(helmet, {
+    contentSecurityPolicy:
+      nodeEnv === "production"
+        ? {
+            directives: {
+              defaultSrc: ["'self'"],
+              baseUri: ["'self'"],
+              objectSrc: ["'none'"],
+              frameAncestors: ["'none'"],
+              formAction: ["'self'"],
+              scriptSrc: ["'self'"],
+              styleSrc: ["'self'", "'unsafe-inline'"],
+              imgSrc: ["'self'", "data:", "https:"],
+              fontSrc: ["'self'", "data:"],
+              connectSrc: ["'self'"],
+              upgradeInsecureRequests: [],
+            },
+          }
+        : false,
+  });
   app.register(cookie);
   app.register(jwt, { secret: jwtSecret });
-  app.register(rateLimit, { global: false });
+  const authRateLimit = { max: authRateLimitMax, timeWindow: authRateLimitWindowMs };
   app.setErrorHandler((error: Error & { statusCode?: number; fieldErrors?: FieldErrors }, request, reply) => {
     const statusCode = error.statusCode ?? 500;
     if (statusCode >= 500) {
@@ -310,7 +434,7 @@ export function buildApp({
 
   app.post<{ Body: unknown }>(
     "/auth/register",
-    { config: { rateLimit: AUTH_RATE_LIMIT } },
+    { config: { rateLimit: authRateLimit } },
     async (request, reply) => {
       if (nodeEnv !== "development") {
         throw httpError(404, "Not found");
@@ -359,7 +483,7 @@ export function buildApp({
 
   app.post<{ Body: unknown }>(
     "/auth/login",
-    { config: { rateLimit: AUTH_RATE_LIMIT } },
+    { config: { rateLimit: authRateLimit } },
     async (request, reply) => {
       const parsed = LoginSchema.safeParse(request.body);
       if (!parsed.success) throw httpError(400, "Invalid login details");
@@ -400,7 +524,7 @@ export function buildApp({
     },
   );
 
-  app.post("/auth/refresh", { config: { rateLimit: AUTH_RATE_LIMIT } }, async (request, reply) => {
+  app.post("/auth/refresh", { config: { rateLimit: authRateLimit } }, async (request, reply) => {
     requireCsrf(request);
     const token = request.cookies[REFRESH_COOKIE];
     if (!token) throw httpError(401, "Refresh session is not available");
@@ -447,7 +571,7 @@ export function buildApp({
 
   app.post(
     "/auth/logout",
-    { preHandler: [app.authenticate], config: { rateLimit: AUTH_RATE_LIMIT } },
+    { preHandler: [app.authenticate], config: { rateLimit: authRateLimit } },
     async (request, reply) => {
       requireCsrf(request);
       await authRepository.revokeSession(request.user.sid, new Date());

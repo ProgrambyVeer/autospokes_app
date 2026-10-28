@@ -23,6 +23,7 @@ async function setup() {
     clock: () => clock,
     jwtSecret: "test-only-secret-with-more-than-thirty-two-characters",
     nodeEnv: "development",
+    authRateLimitMax: 100,
   });
   apps.push(app);
 

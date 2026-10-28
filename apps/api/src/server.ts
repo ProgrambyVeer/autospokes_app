@@ -7,23 +7,11 @@ import { PrismaOwnerRepository } from "./owner/prisma-repository.js";
 import { PrismaDetailerRepository } from "./detailer/prisma-repository.js";
 import { PrismaSocietyRepository } from "./society/prisma-repository.js";
 import { PrismaMarketplaceRepository } from "./marketplace/prisma-repository.js";
+import { parseServerConfig } from "./config.js";
 
-const port = Number(process.env.PORT ?? 3001);
-const host = process.env.HOST ?? "127.0.0.1";
-const jwtSecret = process.env.JWT_SECRET;
-const nodeEnv = process.env.NODE_ENV;
+const config = parseServerConfig(process.env);
 
-if (!Number.isInteger(port) || port < 1 || port > 65535) {
-  throw new Error(`Invalid PORT value: ${process.env.PORT}`);
-}
-if (!jwtSecret || jwtSecret.length < 32) {
-  throw new Error("Set JWT_SECRET to a random value of at least 32 characters in apps/api/.env");
-}
-if (nodeEnv !== "development" && nodeEnv !== "production") {
-  throw new Error("Set NODE_ENV to development or production in apps/api/.env");
-}
-
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({ datasourceUrl: config.databaseUrl });
 await verifyDedicatedDatabase(prisma);
 const app = buildApp({
   authRepository: new PrismaAuthRepository(prisma),
@@ -31,12 +19,17 @@ const app = buildApp({
   detailerRepository: new PrismaDetailerRepository(prisma),
   societyRepository: new PrismaSocietyRepository(prisma),
   marketplaceRepository: new PrismaMarketplaceRepository(prisma),
-  jwtSecret,
-  nodeEnv,
-  trustProxy: process.env.TRUST_PROXY === "true",
+  jwtSecret: config.jwtSecret,
+  nodeEnv: config.nodeEnv,
+  corsOrigins: config.corsOrigins,
+  trustProxy: config.trustedProxyAddresses,
+  rateLimitMax: config.rateLimitMax,
+  rateLimitWindowMs: config.rateLimitWindowMs,
+  authRateLimitMax: config.authRateLimitMax,
+  authRateLimitWindowMs: config.authRateLimitWindowMs,
   readinessCheck: async () => {
     await prisma.$queryRaw`SELECT 1`;
   },
 });
 app.addHook("onClose", async () => prisma.$disconnect());
-await app.listen({ port, host });
+await app.listen({ port: config.port, host: config.host });
