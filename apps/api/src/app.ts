@@ -6,6 +6,9 @@ import { verify } from "@node-rs/argon2";
 import {
   HealthResponseSchema,
   AccountIdSchema,
+  AdminAccountQuerySchema,
+  AdminAuditQuerySchema,
+  AdminSuspensionInputSchema,
   CreateVehicleSchema,
   LoginSchema,
   OwnerProfileUpdateSchema,
@@ -21,7 +24,7 @@ import Fastify, {
   type FastifyRequest,
   type preHandlerHookHandler,
 } from "fastify";
-import type { AuthRepository, SessionRecord } from "./auth/repository.js";
+import type { AdminUserRecord, AuthRepository, SessionRecord } from "./auth/repository.js";
 import { buildOwnerDashboard } from "./owner/dashboard.js";
 import type { OwnerRepository } from "./owner/repository.js";
 import type { DetailerRepository } from "./detailer/repository.js";
@@ -74,6 +77,10 @@ type BuildAppOptions = {
   clock?: () => Date;
   jwtSecret: string;
   nodeEnv: string;
+  /** Set only when the API runs behind a trusted reverse proxy, so rate limits key on the real client IP. */
+  trustProxy?: boolean;
+  /** Resolves when dependencies (the database) are reachable; backs GET /ready. */
+  readinessCheck?: () => Promise<void>;
 };
 
 const AUTH_RATE_LIMIT = {
@@ -207,12 +214,20 @@ export function buildApp({
   clock = () => new Date(),
   jwtSecret,
   nodeEnv,
+  trustProxy = false,
+  readinessCheck,
 }: BuildAppOptions) {
   if (jwtSecret.length < 32) {
     throw new Error("JWT_SECRET must contain at least 32 characters");
   }
 
-  const app = Fastify({ logger: nodeEnv !== "test" });
+  const app = Fastify({
+    trustProxy,
+    logger:
+      nodeEnv === "test"
+        ? false
+        : { redact: ["req.headers.authorization", "req.headers.cookie", "res.headers['set-cookie']"] },
+  });
   const dummyPasswordHash = DUMMY_PASSWORD_HASH;
   const secureCookies = nodeEnv === "production";
 
@@ -282,6 +297,16 @@ export function buildApp({
       service: "autospokes-api",
     }),
   );
+
+  app.get("/ready", async (_request, reply) => {
+    if (!readinessCheck) return { status: "ok", checks: { database: "not-configured" } };
+    try {
+      await readinessCheck();
+      return { status: "ok", checks: { database: "ok" } };
+    } catch {
+      return reply.code(503).send({ status: "unavailable", checks: { database: "unreachable" } });
+    }
+  });
 
   app.post<{ Body: unknown }>(
     "/auth/register",
@@ -675,8 +700,65 @@ export function buildApp({
     {
       preHandler: [app.authenticate, requireRole("SUPERADMIN")],
     },
-    async () => ({ events: await authRepository.listAuditEvents() }),
+    async (request) => {
+      const parsed = AdminAuditQuerySchema.safeParse(request.query);
+      if (!parsed.success) throw validationError("Invalid audit query", parsed.error);
+      return { events: await authRepository.listAuditEvents(parsed.data) };
+    },
   );
+
+  const adminOnly = [app.authenticate, requireRole("SUPERADMIN")];
+  const serializeAdminUser = (user: AdminUserRecord) => ({
+    ...user,
+    createdAt: user.createdAt.toISOString(),
+    suspension: user.suspension ? { reason: user.suspension.reason, at: user.suspension.at.toISOString() } : null,
+  });
+
+  app.get("/admin/accounts", { preHandler: adminOnly }, async (request) => {
+    const parsed = AdminAccountQuerySchema.safeParse(request.query);
+    if (!parsed.success) throw validationError("Invalid account query", parsed.error);
+    const users = await authRepository.listUsersForAdmin(parsed.data);
+    return { accounts: users.map(serializeAdminUser) };
+  });
+
+  app.get<{ Params: { userId: string } }>("/admin/accounts/:userId", { preHandler: adminOnly }, async (request) => {
+    const userId = AccountIdSchema.safeParse(request.params.userId);
+    if (!userId.success) throw httpError(404, "Account not found");
+    const user = await authRepository.findUserForAdmin(userId.data);
+    if (!user) throw httpError(404, "Account not found");
+    return { account: serializeAdminUser(user) };
+  });
+
+  for (const [path, status] of [
+    ["suspend", "DISABLED"],
+    ["reactivate", "ACTIVE"],
+  ] as const) {
+    app.post<{ Params: { userId: string } }>(
+      `/admin/accounts/:userId/${path}`,
+      { preHandler: adminOnly },
+      async (request) => {
+        const userId = AccountIdSchema.safeParse(request.params.userId);
+        if (!userId.success) throw httpError(404, "Account not found");
+        const parsed = AdminSuspensionInputSchema.safeParse(request.body);
+        if (!parsed.success) throw validationError("A reason of at least 5 characters is required", parsed.error);
+        const result = await authRepository.setUserStatus({
+          userId: userId.data,
+          status,
+          actorId: request.user.sub,
+          reason: parsed.data.reason,
+          now: clock(),
+        });
+        if (!result.ok) {
+          if (result.reason === "NOT_FOUND") throw httpError(404, "Account not found");
+          if (result.reason === "PROTECTED") {
+            throw httpError(403, "Superadmin accounts and your own account cannot be changed here");
+          }
+          throw httpError(409, status === "DISABLED" ? "Account is already suspended" : "Account is already active");
+        }
+        return { account: serializeAdminUser(result.user) };
+      },
+    );
+  }
 
   if (detailerRepository) {
     registerDetailerRoutes(app, {

@@ -54,8 +54,38 @@ export type AuditRecord = {
   actorId: string | null;
   accountId: string | null;
   action: string;
+  details: Record<string, unknown> | null;
   createdAt: Date;
 };
+
+export type AuditFilter = {
+  action?: string;
+  accountId?: string;
+  limit?: number;
+};
+
+/** Minimal operator view of a user: no password hash, tokens, phone numbers or documents. */
+export type AdminUserRecord = {
+  id: string;
+  email: string;
+  status: "ACTIVE" | "DISABLED";
+  createdAt: Date;
+  role: ApiRole;
+  displayName: string;
+  accountId: string | null;
+  suspension: { reason: string; at: Date } | null;
+};
+
+export type AdminUserFilter = {
+  role?: ApiRole;
+  status?: "ACTIVE" | "DISABLED";
+  q?: string;
+  limit: number;
+};
+
+export type UserStatusChange =
+  | { ok: true; user: AdminUserRecord }
+  | { ok: false; reason: "NOT_FOUND" | "PROTECTED" | "UNCHANGED" };
 
 export interface AuthRepository {
   findCredentialByEmail(email: string): Promise<CredentialRecord | null>;
@@ -82,5 +112,18 @@ export interface AuthRepository {
   revokeSession(id: string, at: Date): Promise<void>;
   appendAuditEvent(input: AuditInput): Promise<void>;
   findAccountById(id: string): Promise<AccountRecord | null>;
-  listAuditEvents(): Promise<AuditRecord[]>;
+  listAuditEvents(filter?: AuditFilter): Promise<AuditRecord[]>;
+  listUsersForAdmin(filter: AdminUserFilter): Promise<AdminUserRecord[]>;
+  findUserForAdmin(userId: string): Promise<AdminUserRecord | null>;
+  /**
+   * Atomically disables or re-enables a non-Superadmin user. Disabling also revokes every session.
+   * The reason and actor are recorded in the audit trail in the same transaction.
+   */
+  setUserStatus(input: {
+    userId: string;
+    status: "ACTIVE" | "DISABLED";
+    actorId: string;
+    reason: string;
+    now: Date;
+  }): Promise<UserStatusChange>;
 }

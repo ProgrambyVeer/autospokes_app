@@ -1,5 +1,6 @@
 import {
   AccountIdSchema,
+  AdminPaymentQuerySchema,
   MarketplaceAssignStaffInputSchema,
   MarketplaceBookingInputSchema,
   MarketplaceBookingStatusSchema,
@@ -10,6 +11,7 @@ import {
   MarketplaceDisputeResolveInputSchema,
   MarketplaceDisputeRespondInputSchema,
   MarketplaceDisputeStatusSchema,
+  MarketplaceDisputeWithdrawInputSchema,
   MarketplaceIdempotencyKeySchema,
   MarketplacePaymentRecordSchema,
   MarketplacePaymentRejectInputSchema,
@@ -672,6 +674,24 @@ export function registerMarketplaceRoutes(app: FastifyInstance, deps: RouteDeps)
   );
 
   app.post<{ Params: { bookingId: string }; Body: unknown }>(
+    "/owner/marketplace/bookings/:bookingId/dispute/withdraw",
+    ownerWrite,
+    async (request) => {
+      const accountId = ownerAccount(request);
+      const parsed = MarketplaceDisputeWithdrawInputSchema.safeParse(request.body ?? {});
+      if (!parsed.success) throw validationError("Invalid withdrawal", parsed.error);
+      const booking = await repository.withdrawDispute(
+        accountId,
+        request.user.sub,
+        idOf(request.params.bookingId, "booking"),
+        parsed.data.note ?? null,
+        now(),
+      );
+      return booking ? { booking: withoutStaffId(publicBooking(booking)) } : notFound("Booking");
+    },
+  );
+
+  app.post<{ Params: { bookingId: string }; Body: unknown }>(
     "/owner/marketplace/bookings/:bookingId/cancel",
     ownerWrite,
     async (request) => {
@@ -714,6 +734,30 @@ export function registerMarketplaceRoutes(app: FastifyInstance, deps: RouteDeps)
         outcome: dispute.outcome,
         createdAt: dispute.createdAt,
         entryCount: dispute.entries.length,
+      })),
+    };
+  });
+
+  app.get<{ Querystring: unknown }>("/admin/marketplace/payments", adminRead, async (request) => {
+    adminActor(request);
+    const parsed = AdminPaymentQuerySchema.safeParse(request.query);
+    if (!parsed.success) throw validationError("Invalid payment filter", parsed.error);
+    const payments = await repository.listPayments(parsed.data.status);
+    return {
+      payments: payments.map((payment) => ({
+        id: payment.id,
+        bookingId: payment.bookingId,
+        bookingStatus: payment.bookingStatus,
+        agreedPricePaise: payment.agreedPricePaise,
+        amountPaise: payment.amountPaise,
+        currency: payment.currency,
+        method: payment.method,
+        status: payment.status,
+        createdAt: payment.createdAt,
+        verifiedAt: payment.verifiedAt,
+        verificationSource: payment.verificationSource,
+        hasEvidence: payment.verificationEvidence !== null,
+        failedAt: payment.failedAt,
       })),
     };
   });

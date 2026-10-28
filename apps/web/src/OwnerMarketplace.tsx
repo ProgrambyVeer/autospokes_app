@@ -6,6 +6,7 @@ import {
   getOwnerMarketplaceBooking,
   getOwnerMarketplaceBookings,
   respondToMarketplaceCompletion,
+  withdrawMarketplaceDispute,
   searchMarketplaceServices,
   type AuthSession,
   type MarketplaceBookingDetailView,
@@ -128,6 +129,17 @@ export function OwnerMarketplace({ session, vehicles }: { session: AuthSession; 
     try {
       await respondToMarketplaceCompletion(session, id, decision, reason);
       setNotice(decision === "dispute" ? "Dispute recorded. It stays open until the platform resolves it." : "Completion confirmed.");
+      await Promise.all([loadBookings(), openBooking(id)]);
+    } catch (cause) {
+      setError(cause);
+    }
+  }
+
+  async function withdraw(id: string) {
+    setError(null);
+    try {
+      await withdrawMarketplaceDispute(session, id);
+      setNotice("Dispute withdrawn. The booking is back to awaiting your confirmation, and the dispute history is kept.");
       await Promise.all([loadBookings(), openBooking(id)]);
     } catch (cause) {
       setError(cause);
@@ -259,7 +271,14 @@ export function OwnerMarketplace({ session, vehicles }: { session: AuthSession; 
               ))}
             </div>
           )}
-          {detail.booking.status === "DISPUTED" && <p className="owner-form-note">The dispute is open until the platform resolves it. Settlement is paused meanwhile.</p>}
+          {detail.booking.status === "DISPUTED" && (
+            <>
+              <p className="owner-form-note">The dispute is open until the platform resolves it. Settlement is paused meanwhile.</p>
+              {detail.disputes.some((dispute) => dispute.status === "OPEN" || dispute.status === "RESPONDED") && (
+                <div className="form-actions"><button className="secondary-button" type="button" onClick={() => void withdraw(detail.booking.id)}>Withdraw dispute</button></div>
+              )}
+            </>
+          )}
           {["REQUESTED", "ACCEPTED"].includes(detail.booking.status) && (
             <form className="inline-form" onSubmit={(event) => { event.preventDefault(); const reason = String(new FormData(event.currentTarget).get("reason") ?? "").trim(); void cancel(detail.booking.id, reason); }}>
               <label>Reason for cancelling<input name="reason" maxLength={500} required /></label>

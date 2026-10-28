@@ -723,3 +723,106 @@ describe("Owner dashboard with real marketplace bookings", () => {
     expect(screen.queryByRole("region", { name: "Marketplace bookings" })).not.toBeInTheDocument();
   });
 });
+
+describe("Superadmin console", () => {
+  const adminSession = {
+    ...session,
+    user: { ...session.user, email: "admin@example.test", role: "SUPERADMIN", displayName: "Ada Admin", accountId: null },
+  };
+  const account = {
+    id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    email: "someone@example.test",
+    status: "ACTIVE",
+    createdAt: "2030-01-01T00:00:00.000Z",
+    role: "OWNER",
+    displayName: "Some Owner",
+    accountId: null,
+    suspension: null,
+  };
+
+  afterEach(() => {
+    window.location.hash = "";
+  });
+
+  it("offers no registration, signs in as SUPERADMIN and suspends with a recorded reason", async () => {
+    window.location.hash = "#admin";
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock.mockImplementation(async (input) => {
+      const path = String(input);
+      if (path === "/auth/login") return jsonResponse(adminSession);
+      if (path.startsWith("/admin/accounts/") && path.endsWith("/suspend")) {
+        return jsonResponse({ account: { ...account, status: "DISABLED", suspension: { reason: "Fraud review", at: "2030-01-02T00:00:00.000Z" } } });
+      }
+      if (path.startsWith("/admin/accounts")) return jsonResponse({ accounts: [account] });
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Operations sign-in." })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Workspace")).not.toBeInTheDocument();
+    expect(screen.queryByText(/create .* account/i)).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Email address" }), { target: { value: "admin@example.test" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "correct-horse-battery-staple" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByRole("heading", { name: "Find and review accounts" })).toBeInTheDocument();
+    expect(JSON.parse(String((fetchMock.mock.calls.find(([url]) => url === "/auth/login")?.[1] as RequestInit).body))).toMatchObject({ role: "SUPERADMIN" });
+    expect(await screen.findByText("Some Owner")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Suspend" }));
+    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: "Fraud review" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm suspension" }));
+    expect(await screen.findByText(/Account suspended/)).toBeInTheDocument();
+    const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/suspend"));
+    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ reason: "Fraud review" });
+  });
+
+  it("shows an honest empty state for payments and requires evidence to verify", async () => {
+    document.cookie = "autospokes_csrf=csrf; path=/";
+    window.location.hash = "#admin";
+    const payment = {
+      id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      bookingId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      bookingStatus: "CUSTOMER_ACCEPTED",
+      agreedPricePaise: 50000,
+      amountPaise: 50000,
+      currency: "INR",
+      method: "UPI",
+      status: "RECORDED_UNVERIFIED",
+      createdAt: "2030-01-01T00:00:00.000Z",
+      verifiedAt: null,
+      verificationSource: null,
+      hasEvidence: false,
+      failedAt: null,
+    };
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock.mockImplementation(async (input) => {
+      const path = String(input);
+      if (path === "/auth/refresh") return jsonResponse(adminSession);
+      if (path.startsWith("/admin/accounts")) return jsonResponse({ accounts: [] });
+      if (path.includes("/verify")) return jsonResponse({ payment: { id: payment.id, status: "VERIFIED" } });
+      if (path.startsWith("/admin/marketplace/payments")) return jsonResponse({ payments: [payment] });
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    expect(await screen.findByText("No accounts match.")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Payments" })[0]!);
+    expect(await screen.findByText(/Recorded unverified/)).toBeInTheDocument();
+    expect(screen.getByText(/No payment gateway is connected/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+    const evidence = screen.getByLabelText(/Evidence reference/);
+    expect(evidence).toBeRequired();
+    fireEvent.change(evidence, { target: { value: "bank-statement-line-3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Mark verified" }));
+    expect(await screen.findByText(/no money was moved by Autospokes/)).toBeInTheDocument();
+  });
+
+  it("does not show the Superadmin console to an Owner session", async () => {
+    document.cookie = "autospokes_csrf=csrf; path=/";
+    const fetchMock = vi.fn<typeof fetch>();
+    configureSuccessfulOwnerApi(fetchMock, { vehicles: [] });
+    await signInAsOwner(fetchMock);
+    expect(screen.queryByLabelText("Superadmin navigation")).not.toBeInTheDocument();
+  });
+});

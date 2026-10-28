@@ -595,13 +595,14 @@ export const MarketplaceDisputeOutcomeSchema = z.enum([
   "REWORK_REQUIRED",
   "CANCELLED_NO_CHARGE",
 ]);
-export const MarketplaceDisputeStatusSchema = z.enum(["OPEN", "RESPONDED", "RESOLVED"]);
+export const MarketplaceDisputeStatusSchema = z.enum(["OPEN", "RESPONDED", "RESOLVED", "WITHDRAWN"]);
 export const MarketplaceRefundStatusSchema = z.enum(["APPROVED_PENDING_EXTERNAL_TRANSFER", "CONFIRMED_EXTERNALLY"]);
 export const MarketplaceCancellationKindSchema = z.enum([
   "OWNER_CANCELLED",
   "VENDOR_CANCELLED",
   "OWNER_NO_SHOW",
   "VENDOR_NO_SHOW",
+  "DISPUTE_RESOLUTION",
 ]);
 export const MarketplacePaymentMethodSchema = z.enum([
   "CASH",
@@ -809,6 +810,26 @@ export const MarketplaceDisputeResolveInputSchema = z.object({
   outcome: MarketplaceDisputeOutcomeSchema,
   rationale: z.string().trim().min(10).max(2000),
 }).strict();
+export const MarketplaceDisputeWithdrawInputSchema = z.object({
+  note: z.string().trim().max(500).optional().nullable(),
+}).strict();
+export const AdminSuspensionInputSchema = z.object({
+  reason: z.string().trim().min(5).max(500),
+}).strict();
+export const AdminAccountQuerySchema = z.object({
+  role: ApiRoleSchema.optional(),
+  status: z.enum(["ACTIVE", "DISABLED"]).optional(),
+  q: z.string().trim().min(1).max(120).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+export const AdminAuditQuerySchema = z.object({
+  action: z.string().trim().min(1).max(80).optional(),
+  accountId: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(100),
+});
+export const AdminPaymentQuerySchema = z.object({
+  status: MarketplacePaymentStatusSchema.optional(),
+});
 export const MarketplaceCancelInputSchema = z.object({
   reason: z.string().trim().min(1).max(500),
   noShow: z.boolean().default(false),

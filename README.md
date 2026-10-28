@@ -335,9 +335,90 @@ confirm the `autospokes` database, then `npm run db:migrate`.
 
 ### Known limitations
 
-No Superadmin interface (the API is available), no gateway, payouts or
-notifications, no Owner dispute withdrawal, and a booking cancelled through a
-dispute outcome has no separate cancellation record.
+No gateway, payouts or notifications. Bookings that were cancelled through a
+dispute outcome before Phase 9 have no separate cancellation record (they are
+not back-filled, to avoid inventing history).
+
+## Superadmin operations and production readiness (Phase 9)
+
+### Superadmin console
+
+Open `http://localhost:5173/#admin` (or your deployed web origin plus `#admin`).
+It is a separate sign-in with no registration and no role picker. Superadmin
+accounts are created only by the one-time bootstrap script above. Tabs:
+
+- **Accounts:** search and filter accounts across all five roles, suspend and
+  reactivate with a required reason (5-500 characters). Suspension takes effect
+  immediately (the session is rejected on every request and all sessions are
+  revoked). You cannot suspend a Superadmin or yourself. Suspension reasons are
+  stored in the audit trail (`ACCOUNT_SUSPENDED` / `ACCOUNT_REACTIVATED`).
+- **Payments:** review vendor-recorded payments. A payment can be marked
+  verified only with a recorded evidence reference (for example a bank-statement
+  line), or rejected with a reason. References and evidence text are never
+  listed. This is manual reconciliation: no gateway is connected and no money is
+  moved by Autospokes.
+- **Disputes:** review the full dispute history (opened, vendor response,
+  withdrawn, resolved) and resolve with an outcome and a rationale.
+- **Audit:** privileged-operation history, filterable by action.
+
+API: `GET /admin/accounts`, `GET /admin/accounts/:userId`,
+`POST /admin/accounts/:userId/suspend|reactivate`, `GET /admin/audit-events`
+(`?action=`, `?accountId=`, `?limit=`), `GET /admin/marketplace/payments`, plus
+the Phase 8 `/admin/marketplace/*` routes. All require the `SUPERADMIN` role.
+No identity (KYC) data is collected or displayed.
+
+### Marketplace changes
+
+- An Owner can withdraw an open or responded dispute. The booking returns to
+  `PROVIDER_REPORTED_COMPLETION`, the dispute becomes `WITHDRAWN` and its history
+  is kept. A withdrawn dispute is immutable, no longer blocks settlement, and a
+  new dispute may be raised later.
+- Resolving a dispute as `CANCELLED_NO_CHARGE` now writes a cancellation record
+  (`DISPUTE_RESOLUTION`, no fee, initiator Superadmin).
+
+### Applying the Phase 9 migrations
+
+Two additive migrations: `20261125100000_phase9_enum_values` (three enum values)
+and `20261125100100_phase9_dispute_withdrawal` (replaces the dispute guard
+function body so withdrawn disputes are immutable, and adds a CHECK constraint).
+No data is changed or removed. Run `npm run db:verify`, confirm the `autospokes`
+database, then `npm run db:migrate`. Restart the API afterwards so it loads the
+regenerated Prisma client.
+
+### Production readiness
+
+Added in Phase 9: `GET /ready` (returns 503 without details if the database is
+unreachable; `/health` stays a cheap liveness check), `TRUST_PROXY=true` for
+deployments behind a reverse proxy (so rate limits use the real client IP), log
+redaction of `Authorization` and cookie headers, and the missing dev proxy
+entries for `/marketplace` and `/admin`.
+
+Manual steps before any real deployment:
+
+1. Set `NODE_ENV=production`, a strong random `JWT_SECRET` and a managed
+   `DATABASE_URL` for a dedicated database; never commit `.env`.
+2. Serve the web app and API from one HTTPS origin (cookies are `Secure` in
+   production), and set `TRUST_PROXY=true` only behind a proxy you control.
+3. Run `npx prisma migrate deploy` (via `npm run db:migrate`) as a release step
+   and take a backup first.
+4. Create the first Superadmin with the bootstrap script
+   (`ALLOW_PRODUCTION_SUPERADMIN_BOOTSTRAP=true` for that single run only).
+5. Point your platform health probes at `/ready`.
+
+Remaining blockers (this is **not** production-ready):
+
+- No payment gateway or server-side callback, so every payment verification is
+  manual, and no payouts exist.
+- No notifications (email, SMS, WhatsApp) for disputes, payments or suspensions.
+- No security headers or CORS policy are configured at the API; terminate TLS and
+  add headers at the proxy.
+- Rate limiting uses in-memory counters (per process), and there is no refresh-
+  token or password-reset flow beyond what Phase 2 provides.
+- No deployment pipeline, backup or monitoring setup, and CI runs only
+  build, lint and unit tests (no database-backed tests).
+- Pending policy decisions (cancellation fees, refunds, who may resolve disputes
+  besides a Superadmin, whether manual reconciliation is acceptable).
+- A suspension reason is stored only in the audit trail, not on the user record.
 
 ## Workspace commands
 

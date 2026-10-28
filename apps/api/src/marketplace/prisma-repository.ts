@@ -20,6 +20,7 @@ import type {
 } from "./repository.js";
 import {
   BOOKING_TRANSITIONS,
+  DISPUTE_CANCELLATION_POLICY_KEY,
   MarketplaceRuleError,
   assertDisputeRespondable,
   assertPaymentRecordable,
@@ -28,6 +29,7 @@ import {
   assertStaffAssignable,
   planCancellation,
   planDisputeResolution,
+  planDisputeWithdrawal,
   planTransition,
 } from "./rules.js";
 
@@ -624,6 +626,53 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
     });
   }
 
+  async withdrawDispute(
+    ownerAccountId: string,
+    actorId: string,
+    bookingId: string,
+    note: string | null,
+    now: Date,
+  ) {
+    void now;
+    return this.prisma.$transaction(async (tx) => {
+      const owned = await tx.marketplaceBooking.findFirst({ where: { id: bookingId, ownerAccountId } });
+      if (!owned) return null;
+      const booking = (await this.lockBooking(tx, bookingId)) ?? owned;
+      const dispute = await tx.marketplaceDispute.findFirst({
+        where: { bookingId, ownerAccountId, status: { in: ["OPEN", "RESPONDED"] } },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!dispute) throw new MarketplaceRuleError(409, "There is no open dispute to withdraw");
+      const to = planDisputeWithdrawal(booking, dispute);
+      const closed = await tx.marketplaceDispute.updateMany({
+        where: { id: dispute.id, status: { in: ["OPEN", "RESPONDED"] } },
+        data: { status: "WITHDRAWN" },
+      });
+      if (closed.count !== 1) throw new MarketplaceRuleError(409, "This dispute is already closed");
+      const moved = await tx.marketplaceBooking.updateMany({
+        where: { id: booking.id, status: "DISPUTED" },
+        data: { status: to },
+      });
+      if (moved.count !== 1) throw new MarketplaceRuleError(409, CONCURRENT);
+      await tx.marketplaceDisputeEntry.create({
+        data: {
+          disputeId: dispute.id,
+          bookingId,
+          kind: "WITHDRAWN",
+          actorId,
+          actorRole: "OWNER",
+          message: note ?? "The Owner withdrew this dispute",
+          evidenceUrls: [],
+        },
+      });
+      await this.recordEvent(tx, booking, actorId, "OWNER", "dispute_withdrawn", { from: "DISPUTED", to, note }, {
+        disputeId: dispute.id,
+      });
+      await this.audit(tx, ownerAccountId, actorId, "marketplace.dispute.withdrawn", { bookingId, disputeId: dispute.id });
+      return tx.marketplaceBooking.findUniqueOrThrow({ where: { id: bookingId } });
+    });
+  }
+
   async cancelBooking(
     scope: BookingScope,
     actorId: string,
@@ -714,6 +763,28 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
         data: { status: to },
       });
       if (moved.count !== 1) throw new MarketplaceRuleError(409, CONCURRENT);
+      if (to === "CANCELLED") {
+        // A dispute-driven cancellation gets the same cancellation record as any other cancellation.
+        const committed = await tx.marketplacePayment.aggregate({
+          where: { bookingId: booking.id, status: { in: ["RECORDED_UNVERIFIED", "VERIFIED"] } },
+          _sum: { amountPaise: true },
+        });
+        await tx.marketplaceCancellation.create({
+          data: {
+            bookingId: booking.id,
+            vendorAccountId: booking.vendorAccountId,
+            kind: "DISPUTE_RESOLUTION",
+            initiatorId: actorId,
+            initiatorRole: "SUPERADMIN",
+            reason: input.rationale.slice(0, 500),
+            policyKey: DISPUTE_CANCELLATION_POLICY_KEY,
+            policyVersion: "1",
+            feePaise: 0,
+            fromStatus: "DISPUTED",
+            unrefundedPaidPaise: committed._sum.amountPaise ?? 0,
+          },
+        });
+      }
       await tx.marketplaceDisputeEntry.create({
         data: {
           disputeId,
@@ -765,6 +836,20 @@ export class PrismaMarketplaceRepository implements MarketplaceRepository {
       await this.audit(tx, null, actorId, `marketplace.${kind}`, { bookingId: booking.id, paymentId, at: now.toISOString() });
       return toPayment(await tx.marketplacePayment.findUniqueOrThrow({ where: { id: paymentId } }));
     });
+  }
+
+  async listPayments(status?: MarketplacePaymentRecord["status"]) {
+    const rows = await this.prisma.marketplacePayment.findMany({
+      where: status ? { status } : {},
+      orderBy: { createdAt: "desc" },
+      include: { booking: { select: { id: true, status: true, servicePricePaise: true } } },
+      take: 200,
+    });
+    return rows.map((row) => ({
+      ...toPayment(row),
+      bookingStatus: row.booking.status,
+      agreedPricePaise: row.booking.servicePricePaise,
+    }));
   }
 
   verifyPayment(actorId: string, paymentId: string, input: { evidenceReference: string; note: string | null }, now: Date) {

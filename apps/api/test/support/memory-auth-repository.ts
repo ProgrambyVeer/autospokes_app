@@ -2,12 +2,16 @@ import { randomUUID } from "node:crypto";
 import type { ApiRole } from "@autospokes/shared";
 import type {
   AccountRecord,
+  AdminUserFilter,
+  AdminUserRecord,
+  AuditFilter,
   AuditInput,
   AuditRecord,
   AuthRepository,
   CredentialRecord,
   SessionCreateInput,
   SessionRecord,
+  UserStatusChange,
 } from "../../src/auth/repository.js";
 
 function uniqueError(): Error & { code: string } {
@@ -155,6 +159,7 @@ export class MemoryAuthRepository implements AuthRepository {
       actorId: input.actorId ?? null,
       accountId: input.accountId ?? null,
       action: input.action,
+      details: input.details ?? null,
       createdAt: new Date(),
     });
   }
@@ -163,7 +168,79 @@ export class MemoryAuthRepository implements AuthRepository {
     return this.accounts.get(id) ?? null;
   }
 
-  async listAuditEvents(): Promise<AuditRecord[]> {
-    return this.auditEvents.slice(0, 100);
+  async listAuditEvents(filter: AuditFilter = {}): Promise<AuditRecord[]> {
+    return this.auditEvents
+      .filter(
+        (event) =>
+          (!filter.action || event.action === filter.action) &&
+          (!filter.accountId || event.accountId === filter.accountId),
+      )
+      .slice(0, filter.limit ?? 100);
+  }
+
+  private toAdminUser(user: CredentialRecord): AdminUserRecord {
+    const profile = user.profiles[0]!;
+    const event =
+      user.status === "DISABLED"
+        ? this.auditEvents.find((item) => item.action === "ACCOUNT_SUSPENDED" && item.details?.targetUserId === user.id)
+        : undefined;
+    return {
+      id: user.id,
+      email: user.email,
+      status: user.status,
+      createdAt: new Date(0),
+      role: profile.role,
+      displayName: profile.displayName,
+      accountId: profile.accountId,
+      suspension: event ? { reason: String(event.details?.reason ?? ""), at: event.createdAt } : null,
+    };
+  }
+
+  async listUsersForAdmin(filter: AdminUserFilter): Promise<AdminUserRecord[]> {
+    const q = filter.q?.toLowerCase();
+    return [...this.users.values()]
+      .filter(
+        (user) =>
+          (!filter.status || user.status === filter.status) &&
+          (!filter.role || user.profiles.some((profile) => profile.role === filter.role)) &&
+          (!q || user.email.toLowerCase().includes(q) || user.profiles.some((p) => p.displayName.toLowerCase().includes(q))),
+      )
+      .slice(0, filter.limit)
+      .map((user) => this.toAdminUser(user));
+  }
+
+  async findUserForAdmin(userId: string): Promise<AdminUserRecord | null> {
+    const user = this.users.get(userId);
+    return user ? this.toAdminUser(user) : null;
+  }
+
+  async setUserStatus(input: {
+    userId: string;
+    status: "ACTIVE" | "DISABLED";
+    actorId: string;
+    reason: string;
+    now: Date;
+  }): Promise<UserStatusChange> {
+    const user = this.users.get(input.userId);
+    if (!user) return { ok: false, reason: "NOT_FOUND" };
+    if (user.profiles.some((profile) => profile.role === "SUPERADMIN") || input.userId === input.actorId) {
+      return { ok: false, reason: "PROTECTED" };
+    }
+    if (user.status === input.status) return { ok: false, reason: "UNCHANGED" };
+    const from = user.status;
+    user.status = input.status;
+    for (const session of this.sessions.values()) {
+      if (session.userId === user.id) {
+        session.userStatus = input.status;
+        if (input.status === "DISABLED" && !session.revokedAt) session.revokedAt = input.now;
+      }
+    }
+    await this.appendAuditEvent({
+      actorId: input.actorId,
+      accountId: user.profiles[0]?.accountId ?? null,
+      action: input.status === "DISABLED" ? "ACCOUNT_SUSPENDED" : "ACCOUNT_REACTIVATED",
+      details: { targetUserId: user.id, reason: input.reason, from, to: input.status },
+    });
+    return { ok: true, user: this.toAdminUser(user) };
   }
 }

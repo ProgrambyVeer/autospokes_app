@@ -323,8 +323,25 @@ export function planDisputeResolution(
 
 export function assertDisputeRespondable(dispute: { status: MarketplaceDisputeStatus }): void {
   if (dispute.status === "RESOLVED") throw new MarketplaceRuleError(409, "This dispute is already resolved");
+  if (dispute.status === "WITHDRAWN") throw new MarketplaceRuleError(409, "This dispute was withdrawn");
   if (dispute.status === "RESPONDED") throw new MarketplaceRuleError(409, "A response has already been recorded");
 }
+
+/**
+ * An Owner may withdraw their own dispute until the platform resolves it. The booking returns to the state it
+ * was disputed from, so the Owner can still accept the completion or raise a new dispute. History is preserved.
+ */
+export function planDisputeWithdrawal(
+  booking: Pick<MarketplaceBookingRecord, "status">,
+  dispute: { status: MarketplaceDisputeStatus },
+): MarketplaceBookingStatus {
+  if (dispute.status === "RESOLVED") throw new MarketplaceRuleError(409, "This dispute is already resolved");
+  if (dispute.status === "WITHDRAWN") throw new MarketplaceRuleError(409, "This dispute was already withdrawn");
+  if (booking.status !== "DISPUTED") throw new MarketplaceRuleError(409, "This booking is not disputed");
+  return BOOKING_TRANSITIONS.dispute.from;
+}
+
+export const DISPUTE_CANCELLATION_POLICY_KEY = "dispute-resolution";
 
 export function snapshotFromService(
   service: MarketplaceServiceRecord,

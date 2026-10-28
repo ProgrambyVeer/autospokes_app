@@ -196,10 +196,15 @@ export type NewMarketplacePayment = {
   idempotencyKey: string | null;
 };
 
+export type AdminPaymentListItem = MarketplacePaymentRecord & {
+  bookingStatus: MarketplaceBookingStatus;
+  agreedPricePaise: number;
+};
+
 export type MarketplaceDisputeEntryRecord = {
   id: string;
   disputeId: string;
-  kind: "OPENED" | "VENDOR_RESPONSE" | "RESOLVED";
+  kind: "OPENED" | "VENDOR_RESPONSE" | "RESOLVED" | "WITHDRAWN";
   actorRole: string;
   message: string;
   evidenceUrls: string[];
@@ -376,10 +381,19 @@ export interface MarketplaceRepository {
     policy: CancellationPolicy,
     now: Date,
   ): Promise<MarketplaceBookingRecord | null>;
+  /** Owner-only; closes the Owner's open dispute and returns the booking to the completion-review state. */
+  withdrawDispute(
+    ownerAccountId: string,
+    actorId: string,
+    bookingId: string,
+    note: string | null,
+    now: Date,
+  ): Promise<MarketplaceBookingRecord | null>;
 
   // Platform (Superadmin) operations: not scoped to an account.
   findBookingForAdmin(bookingId: string): Promise<MarketplaceBookingDetail | null>;
   listDisputes(status?: MarketplaceDisputeStatus): Promise<MarketplaceDisputeRecord[]>;
+  listPayments(status?: MarketplacePaymentStatus): Promise<AdminPaymentListItem[]>;
   resolveDispute(
     actorId: string,
     disputeId: string,

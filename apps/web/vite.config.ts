@@ -10,6 +10,8 @@ export default defineConfig({
       "/owner": "http://127.0.0.1:3001",
       "/detailer": "http://127.0.0.1:3001",
       "/society": "http://127.0.0.1:3001",
+      "/marketplace": "http://127.0.0.1:3001",
+      "/admin": "http://127.0.0.1:3001",
     },
   },
   test: {

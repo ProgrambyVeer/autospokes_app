@@ -6,6 +6,7 @@ import type {
   MarketplaceServiceStatus,
 } from "@autospokes/shared";
 import type {
+  AdminPaymentListItem,
   BookingAction,
   BookingScope,
   DiscoveryCandidate,
@@ -25,6 +26,7 @@ import type {
   TransitionPayload,
 } from "../../src/marketplace/repository.js";
 import {
+  DISPUTE_CANCELLATION_POLICY_KEY,
   MarketplaceRuleError,
   assertDisputeRespondable,
   assertPaymentRecordable,
@@ -33,6 +35,7 @@ import {
   assertStaffAssignable,
   planCancellation,
   planDisputeResolution,
+  planDisputeWithdrawal,
   planTransition,
 } from "../../src/marketplace/rules.js";
 
@@ -286,7 +289,7 @@ export class MemoryMarketplaceRepository implements MarketplaceRepository {
   }
 
   private hasOpenDispute(bookingId: string) {
-    return this.disputes.some((d) => d.bookingId === bookingId && d.status !== "RESOLVED");
+    return this.disputes.some((d) => d.bookingId === bookingId && (d.status === "OPEN" || d.status === "RESPONDED"));
   }
 
   async openDispute(
@@ -342,7 +345,7 @@ export class MemoryMarketplaceRepository implements MarketplaceRepository {
   ) {
     const booking = this.bookings.get(bookingId);
     if (!booking || booking.vendorAccountId !== vendorAccountId) return null;
-    const dispute = this.disputes.find((d) => d.bookingId === bookingId && d.status !== "RESOLVED");
+    const dispute = this.disputes.find((d) => d.bookingId === bookingId && (d.status === "OPEN" || d.status === "RESPONDED"));
     if (!dispute || booking.status !== "DISPUTED") throw new MarketplaceRuleError(409, "There is no open dispute to respond to");
     assertDisputeRespondable(dispute);
     dispute.status = "RESPONDED";
@@ -390,6 +393,30 @@ export class MemoryMarketplaceRepository implements MarketplaceRepository {
     return next;
   }
 
+  async withdrawDispute(ownerAccountId: string, _actorId: string, bookingId: string, note: string | null, now: Date) {
+    const booking = this.bookings.get(bookingId);
+    if (!booking || booking.ownerAccountId !== ownerAccountId) return null;
+    const dispute = this.disputes.find(
+      (d) => d.bookingId === bookingId && d.ownerAccountId === ownerAccountId && (d.status === "OPEN" || d.status === "RESPONDED"),
+    );
+    if (!dispute) throw new MarketplaceRuleError(409, "There is no open dispute to withdraw");
+    const to = planDisputeWithdrawal(booking, dispute);
+    dispute.status = "WITHDRAWN";
+    dispute.entries.push({
+      id: randomUUID(),
+      disputeId: dispute.id,
+      kind: "WITHDRAWN",
+      actorRole: "OWNER",
+      message: note ?? "The Owner withdrew this dispute",
+      evidenceUrls: [],
+      createdAt: now,
+    });
+    const next = this.setBooking(booking, { status: to });
+    this.pushEvent(next, "OWNER", "dispute_withdrawn", "DISPUTED", to, note);
+    this.audits.push({ accountId: ownerAccountId, action: "marketplace.dispute.withdrawn" });
+    return next;
+  }
+
   async listDisputes(status?: MarketplaceDisputeStatus) {
     return this.disputes.filter((d) => !status || d.status === status);
   }
@@ -419,9 +446,33 @@ export class MemoryMarketplaceRepository implements MarketplaceRepository {
       createdAt: now,
     });
     const next = this.setBooking(booking, { status: to });
+    if (to === "CANCELLED") {
+      this.cancellations.set(booking.id, {
+        id: randomUUID(),
+        bookingId: booking.id,
+        kind: "DISPUTE_RESOLUTION",
+        initiatorRole: "SUPERADMIN",
+        reason: input.rationale.slice(0, 500),
+        policyKey: DISPUTE_CANCELLATION_POLICY_KEY,
+        policyVersion: "1",
+        feePaise: 0,
+        fromStatus: "DISPUTED",
+        unrefundedPaidPaise: this.committedPaise(booking.id),
+        createdAt: now,
+      });
+    }
     this.pushEvent(next, "SUPERADMIN", "dispute_resolved", "DISPUTED", to, input.rationale);
     this.audits.push({ accountId: null, action: "marketplace.dispute.resolved" });
     return { booking: next, dispute };
+  }
+
+  async listPayments(status?: MarketplacePaymentRecord["status"]) {
+    return this.payments
+      .filter((p) => !status || p.status === status)
+      .map((p) => {
+        const booking = this.bookings.get(p.bookingId);
+        return { ...p, bookingStatus: booking?.status ?? "CANCELLED", agreedPricePaise: booking?.servicePricePaise ?? 0 } as AdminPaymentListItem;
+      });
   }
 
   private reviewPayment(paymentId: string, patch: Partial<MarketplacePaymentRecord>, kind: string) {

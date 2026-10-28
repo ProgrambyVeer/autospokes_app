@@ -24,6 +24,7 @@ import { Icon, type IconName } from "./components/Icon";
 import { DetailerWorkspace } from "./DetailerApp";
 import { SocietyWorkspace } from "./SocietyApp";
 import { MarketplaceWorkspace } from "./MarketplaceApp";
+import { AdminSignIn, SuperadminWorkspace } from "./SuperadminApp";
 import { OwnerMarketplace } from "./OwnerMarketplace";
 
 type OwnerPage = "Home" | "My vehicles" | "Services" | "Activity" | "Profile" | "Vehicle detail";
@@ -65,6 +66,17 @@ function App() {
   }
 
   if (!session || authStatus === "error") {
+    if (window.location.hash === "#admin") {
+      return (
+        <AdminSignIn
+          onAuthenticated={(authenticated) => {
+            setAuthError("");
+            setSession(authenticated);
+            setAuthStatus("ready");
+          }}
+        />
+      );
+    }
     return (
       <SignIn
         initialError={authError}
@@ -86,6 +98,9 @@ function App() {
     }
     if (session.user.role === "MARKETPLACE_VENDOR") {
       return <MarketplaceWorkspace session={session} onSignOut={() => setSession(null)} />;
+    }
+    if (session.user.role === "SUPERADMIN") {
+      return <SuperadminWorkspace session={session} onSignOut={() => setSession(null)} />;
     }
     return (
       <main className="auth-page">

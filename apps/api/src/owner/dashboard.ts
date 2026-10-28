@@ -16,7 +16,7 @@ export type OwnerDashboardBooking = {
   windowEnd: string;
   servicePricePaise: number;
   payment: { state: PaymentState; verifiedPaise: number; outstandingPaise: number };
-  dispute: "NONE" | "OPEN" | "RESPONDED" | "RESOLVED";
+  dispute: "NONE" | "OPEN" | "RESPONDED" | "RESOLVED" | "WITHDRAWN";
   refundState: RefundState;
 };
 

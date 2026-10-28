@@ -33,6 +33,10 @@ const app = buildApp({
   marketplaceRepository: new PrismaMarketplaceRepository(prisma),
   jwtSecret,
   nodeEnv,
+  trustProxy: process.env.TRUST_PROXY === "true",
+  readinessCheck: async () => {
+    await prisma.$queryRaw`SELECT 1`;
+  },
 });
 app.addHook("onClose", async () => prisma.$disconnect());
 await app.listen({ port, host });

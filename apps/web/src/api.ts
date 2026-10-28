@@ -80,7 +80,7 @@ export type OwnerDashboard = {
       windowEnd: string;
       servicePricePaise: number;
       payment: { state: MarketplacePaymentState; verifiedPaise: number; outstandingPaise: number };
-      dispute: "NONE" | "OPEN" | "RESPONDED" | "RESOLVED";
+      dispute: "NONE" | "OPEN" | "RESPONDED" | "RESOLVED" | "WITHDRAWN";
       refundState: "NONE" | "REVIEW_REQUIRED" | "RESOLVED";
     }[];
   };
@@ -174,6 +174,13 @@ export function signIn(email: string, password: string, role: AccountRole): Prom
   return request("/auth/login", undefined, {
     method: "POST",
     body: JSON.stringify({ email, password, role }),
+  });
+}
+
+export function signInAdmin(email: string, password: string): Promise<AuthSession> {
+  return request("/auth/login", undefined, {
+    method: "POST",
+    body: JSON.stringify({ email, password, role: "SUPERADMIN" }),
   });
 }
 
@@ -676,7 +683,7 @@ export type MarketplaceBookingView = {
 export type MarketplacePaymentState = "NONE" | "RECORDED_UNVERIFIED" | "PARTIALLY_VERIFIED" | "VERIFIED" | "FAILED" | "REFUNDED";
 export type MarketplaceDisputeView = {
   id: string;
-  status: "OPEN" | "RESPONDED" | "RESOLVED";
+  status: "OPEN" | "RESPONDED" | "RESOLVED" | "WITHDRAWN";
   category: string;
   reason: string;
   description: string | null;
@@ -824,4 +831,105 @@ export function respondToMarketplaceCompletion(
   reason?: string,
 ): Promise<unknown> {
   return request(`/owner/marketplace/bookings/${id}/${decision}`, session, post(reason ? { reason } : {}));
+}
+
+export function withdrawMarketplaceDispute(session: AuthSession, id: string, note?: string): Promise<unknown> {
+  return request(`/owner/marketplace/bookings/${id}/dispute/withdraw`, session, post(note ? { note } : {}));
+}
+
+export type AdminAccount = {
+  id: string;
+  email: string;
+  status: "ACTIVE" | "DISABLED";
+  createdAt: string;
+  role: string;
+  displayName: string;
+  accountId: string | null;
+  suspension: { reason: string; at: string } | null;
+};
+export type AdminPayment = {
+  id: string;
+  bookingId: string;
+  bookingStatus: string;
+  agreedPricePaise: number;
+  amountPaise: number;
+  currency: string;
+  method: string;
+  status: string;
+  createdAt: string;
+  verifiedAt: string | null;
+  verificationSource: string | null;
+  hasEvidence: boolean;
+  failedAt: string | null;
+};
+export type AdminDispute = {
+  id: string;
+  bookingId: string;
+  status: "OPEN" | "RESPONDED" | "RESOLVED" | "WITHDRAWN";
+  category: string;
+  reason: string;
+  outcome: string | null;
+  createdAt: string;
+  entryCount: number;
+};
+export type AdminAuditEvent = {
+  id: string;
+  actorId: string | null;
+  accountId: string | null;
+  action: string;
+  details: Record<string, unknown> | null;
+  createdAt: string;
+};
+
+const query = (params: Record<string, string | undefined>): string => {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) if (value) search.set(key, value);
+  const text = search.toString();
+  return text ? `?${text}` : "";
+};
+
+export async function getAdminAccounts(session: AuthSession, filter: { role?: string; status?: string; q?: string }): Promise<AdminAccount[]> {
+  return (await request<{ accounts: AdminAccount[] }>(`/admin/accounts${query(filter)}`, session)).accounts;
+}
+
+export async function setAdminAccountStatus(
+  session: AuthSession,
+  userId: string,
+  action: "suspend" | "reactivate",
+  reason: string,
+): Promise<AdminAccount> {
+  return (await request<{ account: AdminAccount }>(`/admin/accounts/${userId}/${action}`, session, post({ reason }))).account;
+}
+
+export async function getAdminPayments(session: AuthSession, status?: string): Promise<AdminPayment[]> {
+  return (await request<{ payments: AdminPayment[] }>(`/admin/marketplace/payments${query({ status })}`, session)).payments;
+}
+
+export function verifyAdminPayment(session: AuthSession, paymentId: string, evidenceReference: string, note?: string): Promise<unknown> {
+  return request(`/admin/marketplace/payments/${paymentId}/verify`, session, post({ evidenceReference, ...(note ? { note } : {}) }));
+}
+
+export function rejectAdminPayment(session: AuthSession, paymentId: string, reason: string): Promise<unknown> {
+  return request(`/admin/marketplace/payments/${paymentId}/reject`, session, post({ reason }));
+}
+
+export async function getAdminDisputes(session: AuthSession, status?: string): Promise<AdminDispute[]> {
+  return (await request<{ disputes: AdminDispute[] }>(`/admin/marketplace/disputes${query({ status })}`, session)).disputes;
+}
+
+export function getAdminBookingDetail(session: AuthSession, bookingId: string): Promise<MarketplaceBookingDetailView> {
+  return request(`/admin/marketplace/bookings/${bookingId}`, session);
+}
+
+export function resolveAdminDispute(
+  session: AuthSession,
+  disputeId: string,
+  outcome: "UPHELD_COMPLETION" | "REWORK_REQUIRED" | "CANCELLED_NO_CHARGE",
+  rationale: string,
+): Promise<unknown> {
+  return request(`/admin/marketplace/disputes/${disputeId}/resolve`, session, post({ outcome, rationale }));
+}
+
+export async function getAdminAuditEvents(session: AuthSession, filter: { action?: string }): Promise<AdminAuditEvent[]> {
+  return (await request<{ events: AdminAuditEvent[] }>(`/admin/audit-events${query(filter)}`, session)).events;
 }

@@ -182,6 +182,7 @@ enum MarketplaceDisputeStatus {
   OPEN
   RESPONDED
   RESOLVED
+  WITHDRAWN
 }
 
 enum MarketplaceDisputeOutcome {
@@ -194,6 +195,7 @@ enum MarketplaceDisputeEntryKind {
   OPENED
   VENDOR_RESPONSE
   RESOLVED
+  WITHDRAWN
 }
 
 enum MarketplaceRefundStatus {
@@ -206,6 +208,7 @@ enum MarketplaceCancellationKind {
   VENDOR_CANCELLED
   OWNER_NO_SHOW
   VENDOR_NO_SHOW
+  DISPUTE_RESOLUTION
 }
 
 enum MarketplacePaymentMethod {
