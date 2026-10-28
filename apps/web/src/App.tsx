@@ -569,8 +569,55 @@ const statusCopy: Record<OwnerServiceStatus, { label: string; detail: string }> 
   PROVIDER_RECORDED: { label: "Provider recorded", detail: "Recorded by you. Not verified by Autospokes." },
 };
 
-function activityLabel(kind: OwnerDashboard["recentActivity"][number]["kind"]): string {
-  return kind === "VEHICLE_ADDED" ? "Vehicle added" : "Vehicle details updated";
+function activityLabel(item: OwnerDashboard["recentActivity"][number]): string {
+  if (item.kind === "VEHICLE_ADDED") return "Vehicle added";
+  if (item.kind === "VEHICLE_UPDATED") return "Vehicle details updated";
+  const service = item.serviceName ? `${item.serviceName}: ` : "";
+  return `${service}${(item.eventKind ?? "booking update").replace(/_/g, " ")}`;
+}
+
+const paymentStateCopy: Record<string, string> = {
+  NONE: "No payment recorded",
+  RECORDED_UNVERIFIED: "Payment reported, unverified",
+  PARTIALLY_VERIFIED: "Partly verified",
+  VERIFIED: "Payment verified",
+  FAILED: "Payment not verified",
+  REFUNDED: "Refunded",
+};
+
+function OwnerBookingsSummary({ dashboard, onNavigate }: { dashboard: OwnerDashboard; onNavigate: (page: OwnerPage) => void }) {
+  if (!dashboard.availability.bookings.available) return null;
+  const { bookings, counts } = dashboard.marketplace;
+  return (
+    <section className="owner-section" aria-label="Marketplace bookings">
+      <div className="owner-section-heading">
+        <div><p className="section-kicker">BOOKINGS</p><h2>Marketplace bookings</h2></div>
+        <button className="quiet-button" type="button" onClick={() => onNavigate("Services")}>Manage <Icon name="arrow" size={15} /></button>
+      </div>
+      {bookings.length === 0 ? (
+        <div className="empty-state"><h2>No marketplace bookings.</h2><p>Requests you send to vendors will appear here with their real status.</p></div>
+      ) : (
+        <>
+          <p className="owner-form-note">{counts.awaitingVendor} awaiting vendor, {counts.confirmed} confirmed, {counts.disputed} disputed, {counts.cancelled} cancelled.</p>
+          <ul className="status-list">
+            {bookings.slice(0, 4).map((booking) => (
+              <li key={booking.id} className="service-row">
+                <span className="registration-chip">{booking.vehicleRegistration}</span>
+                <span>
+                  <strong>{booking.serviceName}{booking.vendorBusinessName ? ` · ${booking.vendorBusinessName}` : ""}</strong>
+                  <small>{formatWhen(booking.windowStart)} · {booking.status.replace(/_/g, " ").toLowerCase()} · agreed {formatPaise(booking.servicePricePaise)} · {paymentStateCopy[booking.payment.state]}{booking.dispute !== "NONE" ? ` · dispute ${booking.dispute.toLowerCase()}` : ""}</small>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  );
+}
+
+function formatPaise(value: number): string {
+  return `₹${(value / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function formatWhen(value: string): string {
@@ -608,6 +655,16 @@ function OwnerOverview({
 }) {
   const statusById = new Map((dashboard?.vehicles ?? []).map((item) => [item.vehicleId, item.serviceStatus]));
   const withoutProvider = dashboard?.summary.vehiclesWithoutProvider ?? 0;
+  const upcomingEntry = (dashboard?.vehicles ?? [])
+    .map((item) => item.upcomingService)
+    .filter((item): item is NonNullable<typeof item> => item !== null)
+    .sort((a, b) => a.windowStart.localeCompare(b.windowStart))[0];
+  const upcoming = upcomingEntry
+    ? {
+        ...upcomingEntry,
+        registration: dashboard?.marketplace.bookings.find((booking) => booking.id === upcomingEntry.bookingId)?.vehicleRegistration ?? "",
+      }
+    : null;
   return (
     <>
       <div className="owner-eyebrow"><span className="eyebrow-line" /> YOUR AUTOSPOKES OWNER SPACE</div>
@@ -643,8 +700,8 @@ function OwnerOverview({
         <article className="owner-stat">
           <span className="stat-icon"><Icon name="calendar" size={18} /></span>
           <span className="stat-label">Upcoming service</span>
-          <strong>—</strong>
-          <small>Service records are not available yet</small>
+          <strong>{upcoming ? upcoming.serviceName : "—"}</strong>
+          <small>{upcoming ? `${formatWhen(upcoming.windowStart)} · ${upcoming.registration}` : dashboard?.availability.bookings.available ? "No confirmed marketplace booking" : "Booking data is not available"}</small>
         </article>
         <article className="owner-stat">
           <span className="stat-icon"><Icon name="clock" size={18} /></span>
@@ -694,6 +751,8 @@ function OwnerOverview({
         </section>
       )}
 
+      {dashboard && <OwnerBookingsSummary dashboard={dashboard} onNavigate={onNavigate} />}
+
       {dashboard && dashboard.recentActivity.length > 0 && (
         <section className="owner-section">
           <div className="owner-section-heading">
@@ -705,7 +764,7 @@ function OwnerOverview({
           <ul className="activity-list">
             {dashboard.recentActivity.slice(0, 3).map((item) => (
               <li key={item.id}>
-                <strong>{activityLabel(item.kind)}</strong>
+                <strong>{activityLabel(item)}</strong>
                 <span>{item.registrationNumber}</span>
                 <time dateTime={item.occurredAt}>{formatWhen(item.occurredAt)}</time>
               </li>
@@ -795,7 +854,7 @@ function ServicesPage({
       <section className="unavailable-grid" aria-label="Not yet available">
         <article className="detail-card">
           <h2>Bookings</h2>
-          <p>Marketplace requests are listed above with their real status. Other booking types, such as Society or Detailer services, are not scheduled through this page.</p>
+          <p>Marketplace bookings are listed above with their real status, payment and dispute state. Other booking types, such as Society or Detailer services, are not scheduled through this page.</p>
         </article>
         <article className="detail-card">
           <h2>Bills &amp; payments</h2>
@@ -827,13 +886,13 @@ function ActivityPage({
           <div className="empty-state">
             <span className="empty-icon"><Icon name="bell" size={23} /></span>
             <h2>No activity yet.</h2>
-            <p>Changes to your vehicles will appear here.</p>
+            <p>Changes to your vehicles and marketplace bookings will appear here.</p>
           </div>
         ) : (
           <ul className="activity-list">
             {dashboard.recentActivity.map((item) => (
               <li key={item.id}>
-                <strong>{activityLabel(item.kind)}</strong>
+                <strong>{activityLabel(item)}</strong>
                 <button className="text-button" type="button" onClick={() => onOpenVehicle(item.vehicleId)}>{item.registrationNumber}</button>
                 <time dateTime={item.occurredAt}>{formatWhen(item.occurredAt)}</time>
               </li>
@@ -1185,7 +1244,7 @@ function VehicleDetail({
           <section className="detail-card">
             <div className="panel-heading"><div><p className="section-kicker">SERVICE OVERVIEW</p><h2>Care &amp; activity</h2></div></div>
             <div className="service-summary-grid">
-              <SummaryItem title="Upcoming service" value={serviceSummary.upcomingService ? "Upcoming service recorded" : "No service recorded"} detail={serviceSummary.upcomingService ? "See service activity for details." : "Upcoming service details are not available."} icon="calendar" />
+              <SummaryItem title="Upcoming service" value={serviceSummary.upcomingService ? serviceSummary.upcomingService.serviceName : "No upcoming service"} detail={serviceSummary.upcomingService ? `${formatWhen(serviceSummary.upcomingService.windowStart)} · confirmed by the vendor` : "A confirmed marketplace booking for this vehicle will appear here."} icon="calendar" />
               <SummaryItem title="Current wash status" value={String(serviceSummary.currentWashStatus ?? "No wash status available")} detail="Wash statuses appear when a service record is available." icon="sparkle" />
             </div>
             <div className="service-history">

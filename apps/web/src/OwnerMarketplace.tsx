@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { OwnerVehicle } from "@autospokes/shared";
 import {
+  cancelMarketplaceBookingAsOwner,
   createMarketplaceBooking,
   getOwnerMarketplaceBooking,
   getOwnerMarketplaceBookings,
@@ -126,7 +127,18 @@ export function OwnerMarketplace({ session, vehicles }: { session: AuthSession; 
     setError(null);
     try {
       await respondToMarketplaceCompletion(session, id, decision, reason);
-      setNotice(decision === "dispute" ? "Dispute recorded. Resolution is not available yet." : "Completion confirmed.");
+      setNotice(decision === "dispute" ? "Dispute recorded. It stays open until the platform resolves it." : "Completion confirmed.");
+      await Promise.all([loadBookings(), openBooking(id)]);
+    } catch (cause) {
+      setError(cause);
+    }
+  }
+
+  async function cancel(id: string, reason: string) {
+    setError(null);
+    try {
+      await cancelMarketplaceBookingAsOwner(session, id, reason);
+      setNotice("Booking cancelled. No fee was applied and no refund is automatic.");
       await Promise.all([loadBookings(), openBooking(id)]);
     } catch (cause) {
       setError(cause);
@@ -217,10 +229,13 @@ export function OwnerMarketplace({ session, vehicles }: { session: AuthSession; 
             {detail.staffName && <div><dt>Assigned staff</dt><dd>{detail.staffName}</dd></div>}
             <div><dt>When</dt><dd>{formatWindow(detail.booking.windowStart, detail.booking.windowEnd)}</dd></div>
             <div><dt>Agreed price</dt><dd>{paise(detail.booking.servicePricePaise)}</dd></div>
-            <div><dt>Payments</dt><dd>{detail.payment.recordedPaise > 0 ? `${paise(detail.payment.recordedPaise)} noted by the vendor, not verified by Autospokes.` : "None recorded."}</dd></div>
+            <div><dt>Payment</dt><dd>{paymentCopy(detail.payment)}</dd></div>
+            {detail.refundState !== "NONE" && <div><dt>Refund</dt><dd>{detail.refundState === "REVIEW_REQUIRED" ? "Under review by the platform. No refund has been sent yet." : "Refund confirmed by the platform."}</dd></div>}
+            {detail.settlement && <div><dt>Settlement</dt><dd>Recorded internally. This does not mean funds were paid out.</dd></div>}
           </dl>
           {detail.booking.rejectionReason && <p className="owner-form-note">Declined: {detail.booking.rejectionReason}</p>}
           {detail.booking.completionNotes && <p className="owner-form-note">Vendor's completion note: {detail.booking.completionNotes}</p>}
+          {detail.cancellation && <p className="owner-form-note">Cancelled ({label(detail.cancellation.kind)}): {detail.cancellation.reason}. No cancellation fee was applied.</p>}
           {detail.booking.status === "PROVIDER_REPORTED_COMPLETION" && (
             <div className="form-actions">
               <button className="primary-button" type="button" onClick={() => void respond(detail.booking.id, "accept-completion")}>Confirm completed</button>
@@ -230,10 +245,40 @@ export function OwnerMarketplace({ session, vehicles }: { session: AuthSession; 
               </form>
             </div>
           )}
-          {detail.booking.status === "DISPUTED" && <p className="owner-form-note">Disputed. Dispute resolution is not available yet.</p>}
-          {["REQUESTED", "ACCEPTED"].includes(detail.booking.status) && <p className="owner-form-note">Cancellation is not available yet. Contact the vendor directly if plans change.</p>}
+          {detail.disputes.length > 0 && (
+            <div className="dispute-history" aria-label="Dispute history">
+              {detail.disputes.map((dispute) => (
+                <article key={dispute.id} className="detail-card">
+                  <h3>Dispute: {label(dispute.status)}</h3>
+                  <p className="owner-form-note">{label(dispute.category)}: {dispute.reason}</p>
+                  <ul className="status-list">
+                    {dispute.entries.map((entry) => <li key={entry.id}><span><strong>{label(entry.kind)}</strong><small>{label(entry.actorRole)}{entry.message ? `: ${entry.message}` : ""}</small></span></li>)}
+                  </ul>
+                  {dispute.status === "RESOLVED" && <p className="owner-form-note">Outcome: {label(dispute.outcome ?? "")}. {dispute.resolutionRationale}</p>}
+                </article>
+              ))}
+            </div>
+          )}
+          {detail.booking.status === "DISPUTED" && <p className="owner-form-note">The dispute is open until the platform resolves it. Settlement is paused meanwhile.</p>}
+          {["REQUESTED", "ACCEPTED"].includes(detail.booking.status) && (
+            <form className="inline-form" onSubmit={(event) => { event.preventDefault(); const reason = String(new FormData(event.currentTarget).get("reason") ?? "").trim(); void cancel(detail.booking.id, reason); }}>
+              <label>Reason for cancelling<input name="reason" maxLength={500} required /></label>
+              <button className="secondary-button" type="submit">Cancel booking</button>
+            </form>
+          )}
         </section>
       )}
     </section>
   );
+}
+
+function paymentCopy(payment: MarketplaceBookingDetailView["payment"]): string {
+  switch (payment.state) {
+    case "NONE": return "None recorded.";
+    case "RECORDED_UNVERIFIED": return `${paise(payment.recordedPaise)} reported by the vendor, not yet verified by Autospokes.`;
+    case "PARTIALLY_VERIFIED": return `${paise(payment.verifiedPaise)} verified; ${paise(payment.outstandingPaise)} outstanding.`;
+    case "VERIFIED": return `${paise(payment.verifiedPaise)} verified.`;
+    case "FAILED": return "A reported payment could not be verified.";
+    case "REFUNDED": return `${paise(payment.refundedPaise)} refunded.`;
+  }
 }

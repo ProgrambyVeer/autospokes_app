@@ -36,7 +36,7 @@ export type OwnerProfile = {
 };
 
 export type VehicleDashboard = {
-  upcomingService: unknown | null;
+  upcomingService: { bookingId: string; serviceName: string; windowStart: string; windowEnd: string; status: string } | null;
   currentWashStatus: unknown | null;
   recentServiceHistory: unknown[];
   invoices: unknown | null;
@@ -57,15 +57,42 @@ export type OwnerDashboard = {
     serviceStatus: OwnerServiceStatus;
     providerType: OwnerVehicle["providerType"];
     providerVerified: false;
-    upcomingService: null;
+    upcomingService: {
+      bookingId: string;
+      serviceName: string;
+      windowStart: string;
+      windowEnd: string;
+      status: string;
+    } | null;
     currentWashStatus: null;
   }[];
+  marketplace: {
+    connected: boolean;
+    counts: { total: number; awaitingVendor: number; confirmed: number; disputed: number; cancelled: number };
+    bookings: {
+      id: string;
+      vehicleId: string;
+      vehicleRegistration: string;
+      serviceName: string;
+      vendorBusinessName: string | null;
+      status: string;
+      windowStart: string;
+      windowEnd: string;
+      servicePricePaise: number;
+      payment: { state: MarketplacePaymentState; verifiedPaise: number; outstandingPaise: number };
+      dispute: "NONE" | "OPEN" | "RESPONDED" | "RESOLVED";
+      refundState: "NONE" | "REVIEW_REQUIRED" | "RESOLVED";
+    }[];
+  };
   recentActivity: {
     id: string;
-    kind: "VEHICLE_ADDED" | "VEHICLE_UPDATED";
+    kind: "VEHICLE_ADDED" | "VEHICLE_UPDATED" | "BOOKING_EVENT";
     vehicleId: string;
     registrationNumber: string;
     occurredAt: string;
+    bookingId?: string;
+    eventKind?: string;
+    serviceName?: string;
   }[];
   availability: {
     bookings: { available: boolean };
@@ -646,11 +673,28 @@ export type MarketplaceBookingView = {
   acceptedAt: string | null;
   staffId?: string | null;
 };
+export type MarketplacePaymentState = "NONE" | "RECORDED_UNVERIFIED" | "PARTIALLY_VERIFIED" | "VERIFIED" | "FAILED" | "REFUNDED";
+export type MarketplaceDisputeView = {
+  id: string;
+  status: "OPEN" | "RESPONDED" | "RESOLVED";
+  category: string;
+  reason: string;
+  description: string | null;
+  evidenceUrls: string[];
+  outcome: string | null;
+  resolutionRationale?: string | null;
+  createdAt: string;
+  entries: { id: string; kind: string; actorRole: string; message: string | null; createdAt: string }[];
+};
 export type MarketplaceBookingDetailView = {
   booking: MarketplaceBookingView;
   events: { id: string; kind: string; toStatus: string | null; note: string | null; actorRole: string; createdAt: string }[];
-  payments: { id: string; amountPaise: number; method: string; reference: string | null; status: string; createdAt: string }[];
-  payment: { recordedPaise: number; verifiedPaise: number; note: string };
+  payments: { id: string; amountPaise: number; currency?: string; method: string; reference: string | null; status: string; createdAt: string; verifiedAt?: string | null; failureReason?: string | null }[];
+  payment: { recordedPaise: number; verifiedPaise: number; outstandingPaise: number; refundedPaise: number; state: MarketplacePaymentState; note: string };
+  disputes: MarketplaceDisputeView[];
+  settlement: { id: string; agreedPricePaise: number; verifiedPaidPaise: number; externalTransfer: false; createdAt: string } | null;
+  cancellation: { kind: string; reason: string; feePaise: number; policyKey: string; createdAt: string } | null;
+  refundState: "NONE" | "REVIEW_REQUIRED" | "RESOLVED";
   vendor?: { businessName: string | null; contactPhone: string | null };
   staffName?: string | null;
   assignedStaffId?: string | null;
@@ -737,8 +781,20 @@ export function actOnMarketplaceBooking(
 export function assignMarketplaceStaff(session: AuthSession, id: string, staffId: string | null): Promise<unknown> {
   return request(`/marketplace/bookings/${id}/staff`, session, { method: "PUT", body: JSON.stringify({ staffId }) });
 }
-export function recordMarketplacePayment(session: AuthSession, id: string, input: Record<string, unknown>): Promise<unknown> {
-  return request(`/marketplace/bookings/${id}/payments`, session, post(input));
+export function recordMarketplacePayment(session: AuthSession, id: string, input: Record<string, unknown>, idempotencyKey?: string): Promise<unknown> {
+  return request(`/marketplace/bookings/${id}/payments`, session, {
+    ...post(input),
+    ...(idempotencyKey ? { headers: { "idempotency-key": idempotencyKey } } : {}),
+  });
+}
+export function respondToMarketplaceDispute(session: AuthSession, id: string, message: string): Promise<unknown> {
+  return request(`/marketplace/bookings/${id}/dispute/respond`, session, post({ message }));
+}
+export function cancelMarketplaceBookingAsVendor(session: AuthSession, id: string, reason: string, noShow = false): Promise<unknown> {
+  return request(`/marketplace/bookings/${id}/cancel`, session, post({ reason, noShow }));
+}
+export function cancelMarketplaceBookingAsOwner(session: AuthSession, id: string, reason: string, noShow = false): Promise<unknown> {
+  return request(`/owner/marketplace/bookings/${id}/cancel`, session, post({ reason, noShow }));
 }
 
 export function searchMarketplaceServices(session: AuthSession, params: Record<string, string>): Promise<MarketplaceDiscovery> {

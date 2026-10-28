@@ -168,11 +168,44 @@ enum MarketplaceBookingStatus {
   DISPUTED
   SETTLED
   CLOSED
+  CANCELLED
 }
 
 enum MarketplacePaymentStatus {
   RECORDED_UNVERIFIED
   VERIFIED
+  FAILED
+  REFUNDED
+}
+
+enum MarketplaceDisputeStatus {
+  OPEN
+  RESPONDED
+  RESOLVED
+}
+
+enum MarketplaceDisputeOutcome {
+  UPHELD_COMPLETION
+  REWORK_REQUIRED
+  CANCELLED_NO_CHARGE
+}
+
+enum MarketplaceDisputeEntryKind {
+  OPENED
+  VENDOR_RESPONSE
+  RESOLVED
+}
+
+enum MarketplaceRefundStatus {
+  APPROVED_PENDING_EXTERNAL_TRANSFER
+  CONFIRMED_EXTERNALLY
+}
+
+enum MarketplaceCancellationKind {
+  OWNER_CANCELLED
+  VENDOR_CANCELLED
+  OWNER_NO_SHOW
+  VENDOR_NO_SHOW
 }
 
 enum MarketplacePaymentMethod {
@@ -808,6 +841,9 @@ model MarketplaceBooking {
   staff                    MarketplaceStaff?        @relation(fields: [staffId, vendorAccountId], references: [id, accountId], onDelete: NoAction)
   events                   MarketplaceBookingEvent[]
   payments                 MarketplacePayment[]
+  disputes                 MarketplaceDispute[]
+  settlements              MarketplaceSettlement[]
+  cancellations            MarketplaceCancellation[]
 
   @@unique([ownerAccountId, idempotencyKey])
   @@unique([id, vendorAccountId])
@@ -844,8 +880,106 @@ model MarketplacePayment {
   note            String?                  @db.VarChar(500)
   status          MarketplacePaymentStatus @default(RECORDED_UNVERIFIED)
   recordedBy      String                   @db.Uuid
+  currency        String                   @default("INR") @db.Char(3)
+  idempotencyKey  String?                  @db.VarChar(80)
+  verifiedAt      DateTime?                @db.Timestamptz(6)
+  verifiedBy      String?                  @db.Uuid
+  verificationSource   String?             @db.VarChar(40)
+  verificationEvidence Json?
+  failedAt        DateTime?                @db.Timestamptz(6)
+  failedBy        String?                  @db.Uuid
+  failureReason   String?                  @db.VarChar(500)
   createdAt       DateTime                 @default(now()) @db.Timestamptz(6)
   booking         MarketplaceBooking       @relation(fields: [bookingId, vendorAccountId], references: [id, vendorAccountId], onDelete: NoAction)
+  refund          MarketplaceRefund?
 
+  @@unique([bookingId, idempotencyKey])
   @@index([bookingId, createdAt])
+}
+
+model MarketplaceDispute {
+  id               String                    @id @default(uuid()) @db.Uuid
+  bookingId        String                    @db.Uuid
+  vendorAccountId  String                    @db.Uuid
+  ownerAccountId   String                    @db.Uuid
+  status           MarketplaceDisputeStatus  @default(OPEN)
+  category         String                    @db.VarChar(40)
+  reason           String                    @db.VarChar(1000)
+  description      String?                   @db.VarChar(2000)
+  evidenceUrls     String[]                  @default([])
+  openedBy         String                    @db.Uuid
+  outcome          MarketplaceDisputeOutcome?
+  resolutionRationale String?                @db.VarChar(2000)
+  resolvedBy       String?                   @db.Uuid
+  resolvedAt       DateTime?                 @db.Timestamptz(6)
+  createdAt        DateTime                  @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime                  @updatedAt @db.Timestamptz(6)
+  booking          MarketplaceBooking        @relation(fields: [bookingId, vendorAccountId], references: [id, vendorAccountId], onDelete: NoAction)
+  entries          MarketplaceDisputeEntry[]
+
+  @@unique([id, bookingId])
+  @@index([bookingId, createdAt])
+  @@index([status, createdAt])
+}
+
+model MarketplaceDisputeEntry {
+  id           String                      @id @default(uuid()) @db.Uuid
+  disputeId    String                      @db.Uuid
+  bookingId    String                      @db.Uuid
+  kind         MarketplaceDisputeEntryKind
+  actorId      String                      @db.Uuid
+  actorRole    UserRole
+  message      String                      @db.VarChar(2000)
+  evidenceUrls String[]                    @default([])
+  createdAt    DateTime                    @default(now()) @db.Timestamptz(6)
+  dispute      MarketplaceDispute          @relation(fields: [disputeId, bookingId], references: [id, bookingId], onDelete: NoAction)
+
+  @@index([disputeId, createdAt])
+}
+
+model MarketplaceSettlement {
+  id               String             @id @default(uuid()) @db.Uuid
+  bookingId        String             @unique @db.Uuid
+  vendorAccountId  String             @db.Uuid
+  agreedPricePaise Int
+  verifiedPaidPaise Int
+  settledBy        String             @db.Uuid
+  note             String?            @db.VarChar(500)
+  externalTransfer Boolean            @default(false)
+  createdAt        DateTime           @default(now()) @db.Timestamptz(6)
+  booking          MarketplaceBooking @relation(fields: [bookingId, vendorAccountId], references: [id, vendorAccountId], onDelete: NoAction)
+}
+
+model MarketplaceCancellation {
+  id              String                      @id @default(uuid()) @db.Uuid
+  bookingId       String                      @unique @db.Uuid
+  vendorAccountId String                      @db.Uuid
+  kind            MarketplaceCancellationKind
+  initiatorId     String                      @db.Uuid
+  initiatorRole   UserRole
+  reason          String                      @db.VarChar(500)
+  policyKey       String                      @db.VarChar(60)
+  policyVersion   String                      @db.VarChar(20)
+  feePaise        Int                         @default(0)
+  fromStatus      MarketplaceBookingStatus
+  unrefundedPaidPaise Int
+  createdAt       DateTime                    @default(now()) @db.Timestamptz(6)
+  booking         MarketplaceBooking          @relation(fields: [bookingId, vendorAccountId], references: [id, vendorAccountId], onDelete: NoAction)
+}
+
+model MarketplaceRefund {
+  id               String                  @id @default(uuid()) @db.Uuid
+  paymentId        String                  @unique @db.Uuid
+  bookingId        String                  @db.Uuid
+  amountPaise      Int
+  status           MarketplaceRefundStatus @default(APPROVED_PENDING_EXTERNAL_TRANSFER)
+  reason           String                  @db.VarChar(500)
+  approvedBy       String                  @db.Uuid
+  confirmedBy      String?                 @db.Uuid
+  confirmedAt      DateTime?               @db.Timestamptz(6)
+  evidenceReference String?                @db.VarChar(200)
+  createdAt        DateTime                @default(now()) @db.Timestamptz(6)
+  payment          MarketplacePayment      @relation(fields: [paymentId], references: [id], onDelete: NoAction)
+
+  @@index([bookingId])
 }

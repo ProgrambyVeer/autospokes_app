@@ -1,6 +1,10 @@
 import type {
   MarketplaceBookingStatus,
+  MarketplaceCancellationKind,
   MarketplaceDiscoveryQuery,
+  MarketplaceDisputeOutcome,
+  MarketplaceDisputeStatus,
+  MarketplacePaymentStatus,
   MarketplaceServiceCategory,
   VehicleType,
 } from "@autospokes/shared";
@@ -10,6 +14,7 @@ import type {
   BookingSnapshot,
   DiscoveryCandidate,
   MarketplaceBookingRecord,
+  MarketplacePaymentRecord,
   MarketplaceProfileRecord,
   MarketplaceServiceRecord,
   TransitionPayload,
@@ -22,15 +27,15 @@ export class MarketplaceRuleError extends Error {
   }
 }
 
-export type ActorKind = "VENDOR" | "OWNER" | "VERIFIED_PAYMENT_PROCESS";
+export type ActorKind = "VENDOR" | "OWNER" | "PLATFORM_ADMIN";
 
 type TransitionRule = { from: MarketplaceBookingStatus; to: MarketplaceBookingStatus; actor: ActorKind };
 
 /**
  * REQUESTED -> ACCEPTED -> IN_PROGRESS -> PROVIDER_REPORTED_COMPLETION -> CUSTOMER_ACCEPTED -> SETTLED -> CLOSED
- * with REJECTED (from REQUESTED) and DISPUTED (from PROVIDER_REPORTED_COMPLETION) as terminal-for-now branches.
- * Settlement and closure belong to a payment-verification process that does not exist yet, so no API route
- * performs them; they are kept here so the lifecycle stays explicit and testable.
+ * Branches: REJECTED (from REQUESTED); DISPUTED (from PROVIDER_REPORTED_COMPLETION) which a Superadmin resolves to
+ * CUSTOMER_ACCEPTED, IN_PROGRESS (rework) or CANCELLED; CANCELLED (see planCancellation).
+ * Settlement and closure are internal platform records performed only by a Superadmin; no money moves.
  */
 export const BOOKING_TRANSITIONS: Record<BookingAction, TransitionRule> = {
   accept: { from: "REQUESTED", to: "ACCEPTED", actor: "VENDOR" },
@@ -39,11 +44,11 @@ export const BOOKING_TRANSITIONS: Record<BookingAction, TransitionRule> = {
   report_completion: { from: "IN_PROGRESS", to: "PROVIDER_REPORTED_COMPLETION", actor: "VENDOR" },
   customer_accept: { from: "PROVIDER_REPORTED_COMPLETION", to: "CUSTOMER_ACCEPTED", actor: "OWNER" },
   dispute: { from: "PROVIDER_REPORTED_COMPLETION", to: "DISPUTED", actor: "OWNER" },
-  settle: { from: "CUSTOMER_ACCEPTED", to: "SETTLED", actor: "VERIFIED_PAYMENT_PROCESS" },
-  close: { from: "SETTLED", to: "CLOSED", actor: "VERIFIED_PAYMENT_PROCESS" },
+  settle: { from: "CUSTOMER_ACCEPTED", to: "SETTLED", actor: "PLATFORM_ADMIN" },
+  close: { from: "SETTLED", to: "CLOSED", actor: "PLATFORM_ADMIN" },
 };
 
-export type TransitionContext = { verifiedPaidPaise?: number };
+export type TransitionContext = { verifiedPaidPaise?: number; openDispute?: boolean };
 
 export type TransitionPlan = {
   to: MarketplaceBookingStatus;
@@ -100,11 +105,17 @@ export function planTransition(
       return { to: rule.to, patch: { disputeReason: reason, customerRespondedAt: now }, note: reason };
     }
     case "settle":
+      if (context.openDispute) {
+        throw new MarketplaceRuleError(409, "Settlement is blocked while a dispute is unresolved");
+      }
       if ((context.verifiedPaidPaise ?? 0) < booking.servicePricePaise) {
         throw new MarketplaceRuleError(409, "Settlement requires verified payment records covering the agreed price");
       }
       return { to: rule.to, patch: { settledAt: now }, note: null };
     case "close":
+      if (context.openDispute) {
+        throw new MarketplaceRuleError(409, "Closure is blocked while a dispute is unresolved");
+      }
       return { to: rule.to, patch: { closedAt: now }, note: null };
   }
 }
@@ -125,17 +136,194 @@ export function assertStaffAssignable(status: MarketplaceBookingStatus): void {
   }
 }
 
+type PaymentLike = Pick<MarketplacePaymentRecord, "amountPaise" | "status">;
+
+export type PaymentState =
+  | "NONE"
+  | "RECORDED_UNVERIFIED"
+  | "PARTIALLY_VERIFIED"
+  | "VERIFIED"
+  | "FAILED"
+  | "REFUNDED";
+
+export type PaymentSummary = {
+  recordedUnverifiedPaise: number;
+  verifiedPaise: number;
+  failedPaise: number;
+  refundedPaise: number;
+  committedPaise: number;
+  outstandingPaise: number;
+  state: PaymentState;
+};
+
+/** Failed and refunded payments never count toward the agreed price; unverified ones are not proof of payment. */
+export function summarizePayments(payments: PaymentLike[], agreedPricePaise: number): PaymentSummary {
+  const sum = (status: MarketplacePaymentStatus) =>
+    payments.filter((payment) => payment.status === status).reduce((total, payment) => total + payment.amountPaise, 0);
+  const recordedUnverifiedPaise = sum("RECORDED_UNVERIFIED");
+  const verifiedPaise = sum("VERIFIED");
+  const failedPaise = sum("FAILED");
+  const refundedPaise = sum("REFUNDED");
+  let state: PaymentState = "NONE";
+  if (verifiedPaise >= agreedPricePaise) state = "VERIFIED";
+  else if (verifiedPaise > 0) state = "PARTIALLY_VERIFIED";
+  else if (recordedUnverifiedPaise > 0) state = "RECORDED_UNVERIFIED";
+  else if (refundedPaise > 0) state = "REFUNDED";
+  else if (failedPaise > 0) state = "FAILED";
+  return {
+    recordedUnverifiedPaise,
+    verifiedPaise,
+    failedPaise,
+    refundedPaise,
+    committedPaise: recordedUnverifiedPaise + verifiedPaise,
+    outstandingPaise: Math.max(0, agreedPricePaise - verifiedPaise),
+    state,
+  };
+}
+
 export function assertPaymentRecordable(
   booking: Pick<MarketplaceBookingRecord, "status" | "servicePricePaise">,
-  existingPaise: number,
+  committedPaise: number,
   amountPaise: number,
 ): void {
   if (!PAYMENT_RECORDABLE_STATUSES.includes(booking.status)) {
     throw new MarketplaceRuleError(409, "Payments can only be recorded against an accepted booking");
   }
-  if (existingPaise + amountPaise > booking.servicePricePaise) {
+  if (committedPaise + amountPaise > booking.servicePricePaise) {
     throw new MarketplaceRuleError(409, "Recorded payments cannot exceed the agreed price");
   }
+}
+
+export function assertPaymentReviewable(payment: Pick<MarketplacePaymentRecord, "status">): void {
+  if (payment.status !== "RECORDED_UNVERIFIED") {
+    throw new MarketplaceRuleError(
+      409,
+      `This payment is already ${payment.status.toLowerCase().replaceAll("_", " ")} and cannot be reviewed again`,
+    );
+  }
+}
+
+/** Refunds are only reviewed for cancelled bookings; they are internal approvals, not money movement. */
+export function assertRefundable(
+  booking: Pick<MarketplaceBookingRecord, "status">,
+  payment: Pick<MarketplacePaymentRecord, "status">,
+  hasRefund: boolean,
+): void {
+  if (booking.status !== "CANCELLED") {
+    throw new MarketplaceRuleError(409, "Refunds can only be approved for cancelled bookings");
+  }
+  if (payment.status !== "VERIFIED") {
+    throw new MarketplaceRuleError(409, "Only verified payments can be refunded");
+  }
+  if (hasRefund) throw new MarketplaceRuleError(409, "This payment already has a refund");
+}
+
+export type RefundState = "NONE" | "REVIEW_REQUIRED" | "RESOLVED";
+
+export function computeRefundState(status: MarketplaceBookingStatus, payments: PaymentLike[]): RefundState {
+  if (status !== "CANCELLED") return "NONE";
+  if (payments.some((payment) => payment.status === "RECORDED_UNVERIFIED" || payment.status === "VERIFIED")) {
+    return "REVIEW_REQUIRED";
+  }
+  return payments.length > 0 ? "RESOLVED" : "NONE";
+}
+
+export type CancellationPolicy = {
+  key: string;
+  version: string;
+  ownerCancellableFrom: MarketplaceBookingStatus[];
+  vendorCancellableFrom: MarketplaceBookingStatus[];
+  /** Always zero: no fee or penalty is charged automatically. */
+  feePaise: 0;
+  /** Always manual: no refund is issued automatically. */
+  refundMode: "MANUAL_REVIEW";
+};
+
+/**
+ * Safe default until the business confirms fees, deadlines and refund rules: nothing is charged, nothing is
+ * refunded automatically, and cancellation is only self-service before work starts.
+ */
+export const DEFAULT_CANCELLATION_POLICY: CancellationPolicy = {
+  key: "default-no-fee",
+  version: "1",
+  ownerCancellableFrom: ["REQUESTED", "ACCEPTED"],
+  vendorCancellableFrom: ["ACCEPTED"],
+  feePaise: 0,
+  refundMode: "MANUAL_REVIEW",
+};
+
+export type CancellationPlan = {
+  to: "CANCELLED";
+  kind: MarketplaceCancellationKind;
+  reason: string;
+  fromStatus: MarketplaceBookingStatus;
+  policyKey: string;
+  policyVersion: string;
+  feePaise: 0;
+  unrefundedPaidPaise: number;
+};
+
+export function planCancellation(
+  booking: Pick<MarketplaceBookingRecord, "status" | "windowStart">,
+  role: "OWNER" | "VENDOR",
+  input: { reason: string; noShow: boolean },
+  policy: CancellationPolicy,
+  now: Date,
+  committedPaise: number,
+): CancellationPlan {
+  const reason = input.reason.trim();
+  if (!reason) throw new MarketplaceRuleError(400, "A reason is required to cancel");
+  if (booking.status === "DISPUTED") {
+    throw new MarketplaceRuleError(409, "This booking is disputed; it can only be resolved by the platform");
+  }
+  const allowed = role === "OWNER" ? policy.ownerCancellableFrom : policy.vendorCancellableFrom;
+  if (input.noShow) {
+    if (booking.status !== "ACCEPTED") {
+      throw new MarketplaceRuleError(409, "A no-show can only be reported on an accepted booking that has not started");
+    }
+    if (now.getTime() < booking.windowStart.getTime()) {
+      throw new MarketplaceRuleError(409, "A no-show can only be reported after the booked window has started");
+    }
+  } else if (!allowed.includes(booking.status)) {
+    throw new MarketplaceRuleError(
+      409,
+      `A ${booking.status.toLowerCase().replaceAll("_", " ")} booking cannot be cancelled here; raise a dispute or contact support`,
+    );
+  }
+  const kind: MarketplaceCancellationKind = input.noShow
+    ? role === "OWNER" ? "VENDOR_NO_SHOW" : "OWNER_NO_SHOW"
+    : role === "OWNER" ? "OWNER_CANCELLED" : "VENDOR_CANCELLED";
+  return {
+    to: "CANCELLED",
+    kind,
+    reason,
+    fromStatus: booking.status,
+    policyKey: policy.key,
+    policyVersion: policy.version,
+    feePaise: 0,
+    unrefundedPaidPaise: committedPaise,
+  };
+}
+
+const DISPUTE_OUTCOME_STATUS: Record<MarketplaceDisputeOutcome, MarketplaceBookingStatus> = {
+  UPHELD_COMPLETION: "CUSTOMER_ACCEPTED",
+  REWORK_REQUIRED: "IN_PROGRESS",
+  CANCELLED_NO_CHARGE: "CANCELLED",
+};
+
+export function planDisputeResolution(
+  booking: Pick<MarketplaceBookingRecord, "status">,
+  dispute: { status: MarketplaceDisputeStatus },
+  outcome: MarketplaceDisputeOutcome,
+): MarketplaceBookingStatus {
+  if (dispute.status === "RESOLVED") throw new MarketplaceRuleError(409, "This dispute is already resolved");
+  if (booking.status !== "DISPUTED") throw new MarketplaceRuleError(409, "This booking is not disputed");
+  return DISPUTE_OUTCOME_STATUS[outcome];
+}
+
+export function assertDisputeRespondable(dispute: { status: MarketplaceDisputeStatus }): void {
+  if (dispute.status === "RESOLVED") throw new MarketplaceRuleError(409, "This dispute is already resolved");
+  if (dispute.status === "RESPONDED") throw new MarketplaceRuleError(409, "A response has already been recorded");
 }
 
 export function snapshotFromService(

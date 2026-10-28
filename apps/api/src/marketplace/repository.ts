@@ -1,8 +1,13 @@
 import type {
   MarketplaceBookingStatus,
+  MarketplaceCancellationKind,
   MarketplaceCategory,
+  MarketplaceDisputeOutcome,
+  MarketplaceDisputeStatus,
   MarketplaceOperatingHours,
   MarketplacePaymentMethod,
+  MarketplacePaymentStatus as MarketplacePaymentStatusValue,
+  MarketplaceRefundStatus,
   MarketplaceServiceCategory,
   MarketplaceServiceInput,
   MarketplaceServiceStatus,
@@ -10,6 +15,14 @@ import type {
   MarketplaceVerificationStatus,
   VehicleType,
 } from "@autospokes/shared";
+import type { CancellationPolicy } from "./rules.js";
+
+export type DisputeOpenInput = {
+  reason: string;
+  category: string;
+  description: string | null;
+  evidenceUrls: string[];
+};
 
 export type MarketplaceProfileRecord = {
   id: string;
@@ -156,17 +169,23 @@ export type MarketplaceBookingEventRecord = {
   createdAt: Date;
 };
 
-export type MarketplacePaymentStatus = "RECORDED_UNVERIFIED" | "VERIFIED";
+export type MarketplacePaymentStatus = MarketplacePaymentStatusValue;
 
 export type MarketplacePaymentRecord = {
   id: string;
   bookingId: string;
   amountPaise: number;
+  currency: string;
   method: MarketplacePaymentMethod;
   reference: string | null;
   note: string | null;
   status: MarketplacePaymentStatus;
   createdAt: Date;
+  verifiedAt: Date | null;
+  verificationSource: string | null;
+  verificationEvidence: { reference: string; note: string | null } | null;
+  failedAt: Date | null;
+  failureReason: string | null;
 };
 
 export type NewMarketplacePayment = {
@@ -174,12 +193,80 @@ export type NewMarketplacePayment = {
   method: MarketplacePaymentMethod;
   reference: string | null;
   note: string | null;
+  idempotencyKey: string | null;
+};
+
+export type MarketplaceDisputeEntryRecord = {
+  id: string;
+  disputeId: string;
+  kind: "OPENED" | "VENDOR_RESPONSE" | "RESOLVED";
+  actorRole: string;
+  message: string;
+  evidenceUrls: string[];
+  createdAt: Date;
+};
+
+export type MarketplaceDisputeRecord = {
+  id: string;
+  bookingId: string;
+  ownerAccountId: string;
+  vendorAccountId: string;
+  status: MarketplaceDisputeStatus;
+  category: string;
+  reason: string;
+  description: string | null;
+  evidenceUrls: string[];
+  outcome: MarketplaceDisputeOutcome | null;
+  resolutionRationale: string | null;
+  resolvedAt: Date | null;
+  createdAt: Date;
+  entries: MarketplaceDisputeEntryRecord[];
+};
+
+export type MarketplaceSettlementRecord = {
+  id: string;
+  bookingId: string;
+  agreedPricePaise: number;
+  verifiedPaidPaise: number;
+  note: string | null;
+  externalTransfer: false;
+  createdAt: Date;
+};
+
+export type MarketplaceCancellationRecord = {
+  id: string;
+  bookingId: string;
+  kind: MarketplaceCancellationKind;
+  initiatorRole: string;
+  reason: string;
+  policyKey: string;
+  policyVersion: string;
+  feePaise: number;
+  fromStatus: MarketplaceBookingStatus;
+  unrefundedPaidPaise: number;
+  createdAt: Date;
+};
+
+export type MarketplaceRefundRecord = {
+  id: string;
+  paymentId: string;
+  bookingId: string;
+  amountPaise: number;
+  status: MarketplaceRefundStatus;
+  reason: string;
+  confirmedAt: Date | null;
+  evidenceReference: string | null;
+  createdAt: Date;
 };
 
 export type MarketplaceBookingDetail = {
   booking: MarketplaceBookingRecord;
   events: MarketplaceBookingEventRecord[];
   payments: MarketplacePaymentRecord[];
+  disputes: MarketplaceDisputeRecord[];
+  settlement: MarketplaceSettlementRecord | null;
+  cancellation: MarketplaceCancellationRecord | null;
+  refunds: MarketplaceRefundRecord[];
   vendorBusinessName: string | null;
   vendorContactPhone: string | null;
   staffName: string | null;
@@ -265,5 +352,59 @@ export interface MarketplaceRepository {
     actorId: string,
     bookingId: string,
     payment: NewMarketplacePayment,
+  ): Promise<{ payment: MarketplacePaymentRecord; created: boolean } | null>;
+
+  openDispute(
+    ownerAccountId: string,
+    actorId: string,
+    bookingId: string,
+    input: DisputeOpenInput,
+    now: Date,
+  ): Promise<MarketplaceBookingRecord | null>;
+  respondDispute(
+    vendorAccountId: string,
+    actorId: string,
+    bookingId: string,
+    input: { message: string; evidenceUrls: string[] },
+    now: Date,
+  ): Promise<MarketplaceDisputeRecord | null>;
+  cancelBooking(
+    scope: BookingScope,
+    actorId: string,
+    bookingId: string,
+    input: { reason: string; noShow: boolean },
+    policy: CancellationPolicy,
+    now: Date,
+  ): Promise<MarketplaceBookingRecord | null>;
+
+  // Platform (Superadmin) operations: not scoped to an account.
+  findBookingForAdmin(bookingId: string): Promise<MarketplaceBookingDetail | null>;
+  listDisputes(status?: MarketplaceDisputeStatus): Promise<MarketplaceDisputeRecord[]>;
+  resolveDispute(
+    actorId: string,
+    disputeId: string,
+    input: { outcome: MarketplaceDisputeOutcome; rationale: string },
+    now: Date,
+  ): Promise<{ booking: MarketplaceBookingRecord; dispute: MarketplaceDisputeRecord } | null>;
+  verifyPayment(
+    actorId: string,
+    paymentId: string,
+    input: { evidenceReference: string; note: string | null },
+    now: Date,
   ): Promise<MarketplacePaymentRecord | null>;
+  rejectPayment(actorId: string, paymentId: string, reason: string, now: Date): Promise<MarketplacePaymentRecord | null>;
+  approveRefund(actorId: string, paymentId: string, reason: string, now: Date): Promise<MarketplaceRefundRecord | null>;
+  confirmRefund(
+    actorId: string,
+    refundId: string,
+    evidenceReference: string,
+    now: Date,
+  ): Promise<MarketplaceRefundRecord | null>;
+  settleBooking(
+    actorId: string,
+    bookingId: string,
+    note: string | null,
+    now: Date,
+  ): Promise<{ booking: MarketplaceBookingRecord; settlement: MarketplaceSettlementRecord; created: boolean } | null>;
+  closeBooking(actorId: string, bookingId: string, now: Date): Promise<MarketplaceBookingRecord | null>;
 }

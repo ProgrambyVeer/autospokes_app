@@ -276,10 +276,68 @@ retries safe), and confirm or dispute completion.
   reviewed but **not applied** by this change. Run `npm run db:verify`, confirm
   the `autospokes` database, then `npm run db:migrate`.
 
-Not implemented (needs a policy or provider decision): settlement and booking
-closure, dispute resolution, cancellation, refund and no-show rules, payment
-verification, vendor verification, staff logins, ratings, live availability
-slots, and SMS/WhatsApp/in-app notifications. Vendors show as "Not verified".
+Not implemented in Phase 7 (addressed in Phase 8 below where noted): vendor
+verification, staff logins, ratings, live availability slots, and
+SMS/WhatsApp/in-app notifications. Vendors show as "Not verified".
+
+## Marketplace transactions (Phase 8)
+
+Payments, disputes, cancellation, refunds and settlement are separate records
+with explicit states. Business rules live in `apps/api/src/marketplace/rules.ts`;
+every mutation runs in a transaction with a booking row lock and a
+compare-and-set update, so retries and concurrent requests cannot duplicate a
+verification, refund, settlement or closure.
+
+- **Payments:** `RECORDED_UNVERIFIED`, `VERIFIED`, `FAILED`, `REFUNDED`. A vendor
+  records a payment (optional `Idempotency-Key`); only a Superadmin can verify
+  or reject it, with an evidence reference stored as metadata. Totals of
+  unverified plus verified payments cannot exceed the agreed price. There is
+  **no payment gateway or callback**, so "verified" means a platform
+  reconciliation by a Superadmin, not an automated confirmation.
+- **Disputes:** the Owner opens one (reason, category, optional evidence URLs),
+  the vendor responds once, and a Superadmin resolves with an outcome
+  (`UPHELD_COMPLETION`, `REWORK_REQUIRED`, `CANCELLED_NO_CHARGE`) and a written
+  rationale. Entries are append-only and resolved disputes cannot change.
+  Settlement and closure are blocked while a dispute is unresolved.
+- **Settlement:** a Superadmin records an internal settlement once the Owner has
+  accepted completion, verified payments cover the agreed price and no dispute
+  is open. The price is snapshotted. It is a database record only: **no payout
+  or money movement happens**. Closing is a separate step.
+- **Cancellation:** the Owner may cancel before work starts; a vendor may cancel
+  an accepted booking; either side may record a no-show once the window has
+  started. The default policy (`default-no-fee`) charges **no fee** and makes no
+  automatic refund. The policy key and version are stored with each cancellation.
+- **Refunds:** only for a verified payment on a cancelled booking, one per
+  payment. A Superadmin approves (an internal record), then confirms it once the
+  transfer was made outside Autospokes, with an evidence reference.
+- **Owner views:** the dashboard, vehicle detail, Activity and Services pages
+  show real bookings with status, agreed price, payment, dispute and refund
+  state. Billing/invoices and notifications remain unavailable.
+- **Routes:** Superadmin routes are under `/admin/marketplace/*`
+  (disputes, payments verify/reject/refund, refunds confirm, bookings
+  settle/close).
+
+### Applying the Phase 8 migrations
+
+Two additive migrations: `20261120100000_phase8_enum_values` (adds enum values)
+and `20261120100100_phase8_marketplace_transactions` (columns, tables,
+constraints, append-only triggers). They are separate because PostgreSQL cannot
+use a new enum value in the transaction that adds it. Run `npm run db:verify`,
+confirm the `autospokes` database, then `npm run db:migrate`.
+
+### Decisions still needed
+
+- Cancellation fees, deadlines and the no-show penalty (currently none).
+- Refund policy, and whether refunds are allowed outside cancelled bookings.
+- Whether manual Superadmin reconciliation is acceptable until a payment
+  gateway with a server-side callback is chosen.
+- Who may resolve disputes besides a Superadmin.
+
+### Known limitations
+
+No Superadmin interface (the API is available), no gateway, payouts or
+notifications, no Owner dispute withdrawal, and a booking cancelled through a
+dispute outcome has no separate cancellation record.
 
 ## Workspace commands
 

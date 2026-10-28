@@ -12,6 +12,8 @@ import {
   getMarketplaceServices,
   getMarketplaceStaff,
   recordMarketplacePayment,
+  respondToMarketplaceDispute,
+  cancelMarketplaceBookingAsVendor,
   saveMarketplaceProfile,
   setMarketplaceServiceStatus,
   signOut,
@@ -436,15 +438,37 @@ export function MarketplaceWorkspace({ session, onSignOut }: { session: AuthSess
           </form>
         )}
         {booking.status === "PROVIDER_REPORTED_COMPLETION" && <p className="owner-form-note">Waiting for the Owner to confirm or dispute completion.</p>}
-        {booking.status === "DISPUTED" && <p className="owner-form-note">The Owner disputed this booking: {booking.disputeReason}. Dispute resolution is not available yet.</p>}
-        {!["REQUESTED", "REJECTED"].includes(booking.status) && (
+        {booking.status === "DISPUTED" && <p className="owner-form-note">The Owner disputed this booking: {booking.disputeReason}. The platform resolves disputes; settlement is paused until then.</p>}
+        {detail.disputes.map((dispute) => (
+          <article key={dispute.id} className="detail-card">
+            <h3>Dispute: {label(dispute.status)}</h3>
+            <ul className="status-list">
+              {dispute.entries.map((entry) => <li key={entry.id}><span><strong>{label(entry.kind)}</strong><small>{label(entry.actorRole)}{entry.message ? `: ${entry.message}` : ""}</small></span></li>)}
+            </ul>
+            {dispute.status === "RESOLVED" && <p className="owner-form-note">Outcome: {label(dispute.outcome ?? "")}. {dispute.resolutionRationale}</p>}
+            {dispute.status === "OPEN" && (
+              <form className="owner-form" onSubmit={(event) => { event.preventDefault(); const message = String(new FormData(event.currentTarget).get("message") ?? "").trim(); void mutate(() => respondToMarketplaceDispute(session, booking.id, message), "Response recorded.").then(() => openBooking(booking.id)); }}>
+                <label>Your response<input name="message" maxLength={2000} required /></label>
+                <button className="secondary-button" type="submit" disabled={saving}>Send response</button>
+              </form>
+            )}
+          </article>
+        ))}
+        {detail.cancellation && <p className="owner-form-note">Cancelled ({label(detail.cancellation.kind)}): {detail.cancellation.reason}. No cancellation fee was applied.</p>}
+        {booking.status === "ACCEPTED" && (
+          <form className="inline-form" onSubmit={(event) => { event.preventDefault(); const reason = String(new FormData(event.currentTarget).get("reason") ?? "").trim(); void mutate(() => cancelMarketplaceBookingAsVendor(session, booking.id, reason), "Booking cancelled. No fee or refund is applied automatically.").then(() => openBooking(booking.id)); }}>
+            <label>Reason for cancelling<input name="reason" maxLength={500} required /></label>
+            <button className="secondary-button" type="submit" disabled={saving}>Cancel booking</button>
+          </form>
+        )}
+        {!["REQUESTED", "REJECTED", "CANCELLED"].includes(booking.status) && (
           <>
             <h3>Payments you have recorded</h3>
-            <p className="owner-form-note">{detail.payment.note} Recorded {paise(detail.payment.recordedPaise)} of {paise(booking.servicePricePaise)}. Verified: {paise(detail.payment.verifiedPaise)}.</p>
+            <p className="owner-form-note">{detail.payment.note} Recorded {paise(detail.payment.recordedPaise)} of {paise(booking.servicePricePaise)}. Verified by the platform: {paise(detail.payment.verifiedPaise)}.</p>
             <ul className="status-list">
               {detail.payments.map((payment) => <li key={payment.id} className="service-row"><span className="registration-chip">{paise(payment.amountPaise)}</span><span><strong>{label(payment.method)}</strong><small>{label(payment.status)}{payment.reference ? ` · ${payment.reference}` : ""}</small></span></li>)}
             </ul>
-            <form className="owner-form" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); const rupees = Number(String(form.get("amount") ?? "")); void mutate(() => recordMarketplacePayment(session, booking.id, { amountPaise: Math.round(rupees * 100), method: String(form.get("method")), reference: optional(form.get("reference")) }), "Payment note recorded as unverified.").then(() => openBooking(booking.id)); }}>
+            <form className="owner-form" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); const rupees = Number(String(form.get("amount") ?? "")); void mutate(() => recordMarketplacePayment(session, booking.id, { amountPaise: Math.round(rupees * 100), method: String(form.get("method")), reference: optional(form.get("reference")) }, `pay-${crypto.randomUUID()}`), "Payment note recorded as unverified.").then(() => openBooking(booking.id)); }}>
               <label>Amount received (rupees)<input name="amount" inputMode="decimal" required /></label>
               <label>Method<select name="method">{PAYMENT_METHODS.map((value) => <option key={value} value={value}>{label(value)}</option>)}</select></label>
               <label>Reference (optional)<input name="reference" maxLength={120} /></label>

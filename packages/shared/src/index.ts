@@ -580,6 +580,28 @@ export const MarketplaceBookingStatusSchema = z.enum([
   "DISPUTED",
   "SETTLED",
   "CLOSED",
+  "CANCELLED",
+]);
+export const MarketplacePaymentStatusSchema = z.enum(["RECORDED_UNVERIFIED", "VERIFIED", "FAILED", "REFUNDED"]);
+export const MarketplaceDisputeCategorySchema = z.enum([
+  "SERVICE_QUALITY",
+  "INCOMPLETE_WORK",
+  "PRICE_OR_PAYMENT",
+  "DAMAGE",
+  "OTHER",
+]);
+export const MarketplaceDisputeOutcomeSchema = z.enum([
+  "UPHELD_COMPLETION",
+  "REWORK_REQUIRED",
+  "CANCELLED_NO_CHARGE",
+]);
+export const MarketplaceDisputeStatusSchema = z.enum(["OPEN", "RESPONDED", "RESOLVED"]);
+export const MarketplaceRefundStatusSchema = z.enum(["APPROVED_PENDING_EXTERNAL_TRANSFER", "CONFIRMED_EXTERNALLY"]);
+export const MarketplaceCancellationKindSchema = z.enum([
+  "OWNER_CANCELLED",
+  "VENDOR_CANCELLED",
+  "OWNER_NO_SHOW",
+  "VENDOR_NO_SHOW",
 ]);
 export const MarketplacePaymentMethodSchema = z.enum([
   "CASH",
@@ -593,6 +615,12 @@ export type MarketplaceServiceCategory = z.infer<typeof MarketplaceServiceCatego
 export type MarketplaceVerificationStatus = z.infer<typeof MarketplaceVerificationStatusSchema>;
 export type MarketplaceServiceStatus = z.infer<typeof MarketplaceServiceStatusSchema>;
 export type MarketplaceBookingStatus = z.infer<typeof MarketplaceBookingStatusSchema>;
+export type MarketplacePaymentStatus = z.infer<typeof MarketplacePaymentStatusSchema>;
+export type MarketplaceDisputeCategory = z.infer<typeof MarketplaceDisputeCategorySchema>;
+export type MarketplaceDisputeOutcome = z.infer<typeof MarketplaceDisputeOutcomeSchema>;
+export type MarketplaceDisputeStatus = z.infer<typeof MarketplaceDisputeStatusSchema>;
+export type MarketplaceRefundStatus = z.infer<typeof MarketplaceRefundStatusSchema>;
+export type MarketplaceCancellationKind = z.infer<typeof MarketplaceCancellationKindSchema>;
 export type MarketplacePaymentMethod = z.infer<typeof MarketplacePaymentMethodSchema>;
 
 const HttpUrlSchema = z.string().url().max(2048).refine((value) => {
@@ -769,7 +797,39 @@ export const MarketplaceCompletionInputSchema = z.object({
 }).strict();
 export const MarketplaceDisputeInputSchema = z.object({
   reason: z.string().trim().min(1).max(1000),
+  category: MarketplaceDisputeCategorySchema.default("OTHER"),
+  description: z.string().trim().max(2000).optional().nullable(),
+  evidenceUrls: z.array(HttpUrlSchema).max(10).default([]),
 }).strict();
+export const MarketplaceDisputeRespondInputSchema = z.object({
+  message: z.string().trim().min(1).max(2000),
+  evidenceUrls: z.array(HttpUrlSchema).max(10).default([]),
+}).strict();
+export const MarketplaceDisputeResolveInputSchema = z.object({
+  outcome: MarketplaceDisputeOutcomeSchema,
+  rationale: z.string().trim().min(10).max(2000),
+}).strict();
+export const MarketplaceCancelInputSchema = z.object({
+  reason: z.string().trim().min(1).max(500),
+  noShow: z.boolean().default(false),
+}).strict();
+export const MarketplacePaymentVerifyInputSchema = z.object({
+  evidenceReference: z.string().trim().min(3).max(200),
+  note: optionalLabel(500),
+}).strict();
+export const MarketplacePaymentRejectInputSchema = z.object({
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+export const MarketplaceRefundInputSchema = z.object({
+  reason: z.string().trim().min(3).max(500),
+}).strict();
+export const MarketplaceRefundConfirmInputSchema = z.object({
+  evidenceReference: z.string().trim().min(3).max(200),
+}).strict();
+export const MarketplaceSettleInputSchema = z.object({
+  note: optionalLabel(500),
+}).strict();
+export type MarketplaceDisputeInput = z.infer<typeof MarketplaceDisputeInputSchema>;
 export const MarketplaceAssignStaffInputSchema = z.object({
   staffId: z.string().uuid().nullable(),
   note: z.string().trim().max(500).optional().nullable(),

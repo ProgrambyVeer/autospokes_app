@@ -29,6 +29,7 @@ import { registerDetailerRoutes } from "./detailer/routes.js";
 import type { SocietyRepository } from "./society/repository.js";
 import { registerSocietyRoutes } from "./society/routes.js";
 import type { MarketplaceRepository } from "./marketplace/repository.js";
+import type { CancellationPolicy } from "./marketplace/rules.js";
 import { registerMarketplaceRoutes } from "./marketplace/routes.js";
 import {
   ACCESS_TOKEN_TTL_SECONDS,
@@ -69,6 +70,7 @@ type BuildAppOptions = {
   detailerRepository?: DetailerRepository;
   societyRepository?: SocietyRepository;
   marketplaceRepository?: MarketplaceRepository;
+  cancellationPolicy?: CancellationPolicy;
   clock?: () => Date;
   jwtSecret: string;
   nodeEnv: string;
@@ -201,6 +203,7 @@ export function buildApp({
   detailerRepository,
   societyRepository,
   marketplaceRepository,
+  cancellationPolicy,
   clock = () => new Date(),
   jwtSecret,
   nodeEnv,
@@ -508,8 +511,19 @@ export function buildApp({
   app.get(
     "/owner/dashboard",
     { preHandler: ownerOnly },
-    async (request) =>
-      buildOwnerDashboard(await ownerRepository.listVehicles(ownerAccountId(request))),
+    async (request) => {
+      const accountId = ownerAccountId(request);
+      const vehicles = await ownerRepository.listVehicles(accountId);
+      if (!marketplaceRepository) return buildOwnerDashboard(vehicles);
+      // The account always comes from the validated session; the repository scopes every read to it.
+      const scope = { role: "OWNER", accountId } as const;
+      const listed = await marketplaceRepository.listBookings(scope);
+      const recent = [...listed].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).slice(0, 12);
+      const details = (
+        await Promise.all(recent.map((booking) => marketplaceRepository.findBooking(scope, booking.id)))
+      ).filter((detail): detail is NonNullable<typeof detail> => detail !== null);
+      return buildOwnerDashboard(vehicles, { bookings: details, now: clock() });
+    },
   );
 
   app.post<{ Body: unknown }>(
@@ -560,10 +574,35 @@ export function buildApp({
         vehicleId.data,
       );
       if (!vehicle) throw httpError(404, "Vehicle not found");
+      let upcomingService: {
+        bookingId: string;
+        serviceName: string;
+        windowStart: string;
+        windowEnd: string;
+        status: string;
+      } | null = null;
+      if (marketplaceRepository) {
+        const nowMs = clock().getTime();
+        // Scoped to the session's account, and then to this vehicle.
+        const next = (await marketplaceRepository.listBookings({ role: "OWNER", accountId: ownerAccountId(request) }))
+          .filter((booking) => booking.vehicleId === vehicle.id
+            && (booking.status === "ACCEPTED" || booking.status === "IN_PROGRESS")
+            && booking.windowEnd.getTime() >= nowMs)
+          .sort((a, b) => a.windowStart.getTime() - b.windowStart.getTime())[0];
+        if (next) {
+          upcomingService = {
+            bookingId: next.id,
+            serviceName: next.serviceName,
+            windowStart: next.windowStart.toISOString(),
+            windowEnd: next.windowEnd.toISOString(),
+            status: next.status,
+          };
+        }
+      }
       return {
         vehicle,
         serviceSummary: {
-          upcomingService: null,
+          upcomingService,
           currentWashStatus: null,
           recentServiceHistory: [],
           invoices: null,
@@ -667,7 +706,10 @@ export function buildApp({
       ownerRepository,
       vendorPreHandler: [app.authenticate, requireRole("MARKETPLACE_VENDOR")],
       ownerPreHandler: ownerOnly,
+      adminPreHandler: [app.authenticate, requireRole("SUPERADMIN")],
+      cancellationPolicy,
       httpError,
+
       validationError,
       now: clock,
     });

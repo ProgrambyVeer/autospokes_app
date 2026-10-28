@@ -422,6 +422,11 @@ describe("owner dashboard", () => {
         providerCounts: { INDEPENDENT_WASHER: 0, SOCIETY_VENDOR: 0, MARKETPLACE_VENDOR: 0 },
       },
       vehicles: [],
+      marketplace: {
+        connected: false,
+        counts: { total: 0, awaitingVendor: 0, confirmed: 0, disputed: 0, cancelled: 0 },
+        bookings: [],
+      },
       recentActivity: [],
       availability: {
         bookings: { available: false },

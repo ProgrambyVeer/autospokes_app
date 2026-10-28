@@ -321,9 +321,9 @@ describe("booking lifecycle", () => {
     const now = new Date();
     expect(() => planTransition(booking, "settle", "VENDOR", {}, now)).toThrow(/role/);
     expect(() => planTransition(booking, "settle", "OWNER", {}, now)).toThrow(/role/);
-    expect(() => planTransition(booking, "settle", "VERIFIED_PAYMENT_PROCESS", {}, now, { verifiedPaidPaise: 49_999 })).toThrow(/verified payment/);
-    expect(planTransition(booking, "settle", "VERIFIED_PAYMENT_PROCESS", {}, now, { verifiedPaidPaise: 50_000 }).to).toBe("SETTLED");
-    expect(BOOKING_TRANSITIONS.settle.actor).toBe("VERIFIED_PAYMENT_PROCESS");
+    expect(() => planTransition(booking, "settle", "PLATFORM_ADMIN", {}, now, { verifiedPaidPaise: 49_999 })).toThrow(/verified payment/);
+    expect(planTransition(booking, "settle", "PLATFORM_ADMIN", {}, now, { verifiedPaidPaise: 50_000 }).to).toBe("SETTLED");
+    expect(BOOKING_TRANSITIONS.settle.actor).toBe("PLATFORM_ADMIN");
   });
 });
 

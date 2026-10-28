@@ -82,6 +82,11 @@ const emptyDashboard = {
     providerCounts: { INDEPENDENT_WASHER: 0, SOCIETY_VENDOR: 0, MARKETPLACE_VENDOR: 0 },
   },
   vehicles: [],
+  marketplace: {
+    connected: false,
+    counts: { total: 0, awaitingVendor: 0, confirmed: 0, disputed: 0, cancelled: 0 },
+    bookings: [],
+  },
   recentActivity: [],
   availability: {
     bookings: { available: false },
@@ -152,7 +157,7 @@ describe("Owner experience", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
     expect(await screen.findByRole("heading", { name: /A little more care/ })).toBeInTheDocument();
-    expect(screen.getByText("Service records are not available yet")).toBeInTheDocument();
+    expect(screen.getByText("Booking data is not available")).toBeInTheDocument();
     expect(screen.getByText("No invoice data is available yet")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/auth/login", expect.objectContaining({
       method: "POST",
@@ -643,5 +648,78 @@ describe("Marketplace Vendor and Owner marketplace", () => {
     await openServices(fetchMock);
     expect((await screen.findAllByRole("alert")).length).toBeGreaterThan(0);
     expect(screen.queryByText("No marketplace bookings.")).not.toBeInTheDocument();
+  });
+});
+
+describe("Owner dashboard with real marketplace bookings", () => {
+  const bookingFixture = {
+    id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    vehicleId: vehicle().id,
+    vehicleRegistration: "MH 12 AB 1234",
+    serviceName: "Full exterior wash",
+    vendorBusinessName: "P8 Test Garage",
+    status: "ACCEPTED",
+    windowStart: "2030-01-01T06:00:00.000Z",
+    windowEnd: "2030-01-01T07:00:00.000Z",
+    servicePricePaise: 50_000,
+    payment: { state: "PARTIALLY_VERIFIED", verifiedPaise: 10_000, outstandingPaise: 40_000 },
+    dispute: "NONE",
+    refundState: "NONE",
+  };
+  const connectedDashboard = {
+    ...emptyDashboard,
+    summary: { ...emptyDashboard.summary, totalVehicles: 1, activeVehicles: 1, vehiclesWithoutProvider: 1 },
+    vehicles: [{
+      vehicleId: vehicle().id,
+      serviceStatus: "NO_PROVIDER",
+      providerType: null,
+      providerVerified: false,
+      upcomingService: { bookingId: bookingFixture.id, serviceName: "Full exterior wash", windowStart: bookingFixture.windowStart, windowEnd: bookingFixture.windowEnd, status: "ACCEPTED" },
+      currentWashStatus: null,
+    }],
+    marketplace: {
+      connected: true,
+      counts: { total: 1, awaitingVendor: 0, confirmed: 1, disputed: 0, cancelled: 0 },
+      bookings: [bookingFixture],
+    },
+    recentActivity: [
+      { id: "event:1", kind: "BOOKING_EVENT", vehicleId: vehicle().id, registrationNumber: "MH 12 AB 1234", occurredAt: "2030-01-01T05:00:00.000Z", bookingId: bookingFixture.id, eventKind: "accept", serviceName: "Full exterior wash" },
+    ],
+    availability: { bookings: { available: true }, billing: { available: false }, notifications: { available: false } },
+  };
+
+  it("shows real booking, upcoming service, payment state and activity, and keeps billing unavailable", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    configureSuccessfulOwnerApi(fetchMock, { vehicles: [vehicle()], dashboard: connectedDashboard });
+    await signInAsOwner(fetchMock);
+    const section = await screen.findByRole("region", { name: "Marketplace bookings" });
+    expect(within(section).getByText(/P8 Test Garage/)).toBeInTheDocument();
+    expect(within(section).getByText(/Partly verified/)).toBeInTheDocument();
+    expect(within(section).getByText(/1 confirmed/)).toBeInTheDocument();
+    expect(screen.getAllByText("Full exterior wash").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Booking data is not available")).not.toBeInTheDocument();
+    expect(screen.getByText("No invoice data is available yet")).toBeInTheDocument();
+    expect(screen.getByText("Full exterior wash: accept")).toBeInTheDocument();
+  });
+
+  it("shows an honest empty bookings state when connected but there are none", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const dashboard = {
+      ...emptyDashboard,
+      marketplace: { ...emptyDashboard.marketplace, connected: true },
+      availability: { ...emptyDashboard.availability, bookings: { available: true } },
+    };
+    configureSuccessfulOwnerApi(fetchMock, { vehicles: [vehicle()], dashboard });
+    await signInAsOwner(fetchMock);
+    const section = await screen.findByRole("region", { name: "Marketplace bookings" });
+    expect(within(section).getByText("No marketplace bookings.")).toBeInTheDocument();
+    expect(screen.getByText("No confirmed marketplace booking")).toBeInTheDocument();
+  });
+
+  it("does not show a booking section when booking data is unavailable", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    configureSuccessfulOwnerApi(fetchMock, { vehicles: [vehicle()] });
+    await signInAsOwner(fetchMock);
+    expect(screen.queryByRole("region", { name: "Marketplace bookings" })).not.toBeInTheDocument();
   });
 });
