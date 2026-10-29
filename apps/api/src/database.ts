@@ -16,7 +16,7 @@ export function expectedAutospokesDatabaseName(connectionString: string | undefi
     throw new Error("DATABASE_URL must be a valid PostgreSQL connection string");
   }
 
-  if (!/^autospokes(?:_[a-z0-9]+)*$/i.test(databaseName)) {
+  if (!/^autospokes(?:[_-][a-z0-9]+)*$/i.test(databaseName)) {
     throw new Error(
       "Refusing database access: DATABASE_URL must name a dedicated Autospokes database such as autospokes_dev",
     );
